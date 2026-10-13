@@ -20,6 +20,8 @@ export async function Nav() {
           ...((u.role === 'ADMIN' || u.areas.includes('EXPORT')) && can.viewPrices(u.role) ? [{ href: '/precos-exportacao', label: 'Preços exportação' }] : []),
           { href: '/cadastros', label: 'Cadastros' },
           ...(can.manageUsers(u.role) ? [{ href: '/admin/usuarios', label: 'Usuários' }] : []),
+          // importação do catálogo oficial e exclusão de todas as cargas (só o administrador principal)
+          ...(can.manageUsers(u.role) ? [{ href: '/admin/manutencao', label: 'Manutenção' }] : []),
         ]}
         user={
           <div className="user">

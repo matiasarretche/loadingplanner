@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { brandLabelFor } from '@/domain/brandLabels'
+import { isRollPack } from '@/domain/packShape'
 import { distinctSkuColors } from '@/domain/colors'
 import { expeditionModel } from '@/domain/expedition'
 import { loadGeometries, palletParts, shortUnitLabel } from '@/domain/load'
@@ -52,19 +53,21 @@ export function ExpeditionView({ doc, info }: { doc: LoadDoc; info: ExpeditionIn
     let color = '#999'
     let print: string | undefined
     let brand: SceneBody['brand']
+    let roll = false
     if (u.kind === 'PALLET') {
       const p = view.pallets[u.palletKey]
       parts = palletParts(p, u).map((x) => {
         const k = x.packId ? p.packs[x.packId] : undefined
-        return { min: x.box.min, size: x.box.size, color: k ? colorOf.get(k.sku) ?? k.color : '#b48a5a', print: k?.sku, brand: k ? brandLabelFor(k) ?? undefined : undefined }
+        return { min: x.box.min, size: x.box.size, color: k ? colorOf.get(k.sku) ?? k.color : '#b48a5a', print: k?.sku, brand: k ? brandLabelFor(k) ?? undefined : undefined, roll: isRollPack(k) }
       })
     } else {
       const k = view.packs[u.packId]
       color = k ? colorOf.get(k.sku) ?? k.color : '#999'
       print = k?.sku
       brand = k ? brandLabelFor(k) ?? undefined : undefined
+      roll = isRollPack(k)
     }
-    return { id: u.id, min: g.box.min, size: g.box.size, parts, color, print, brand, label: shortUnitLabel(u, view.units.indexOf(u)), selected: sel === u.id }
+    return { id: u.id, min: g.box.min, size: g.box.size, parts, color, print, brand, roll, label: shortUnitLabel(u, view.units.indexOf(u)), selected: sel === u.id }
   })
 
   async function makePdf() {

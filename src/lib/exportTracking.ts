@@ -347,15 +347,31 @@ export async function confirmOrder(
   const src: FieldSource = { source: 'MANUAL', at: nowDate.toISOString(), by: me.id }
   try {
     return await db.transaction(async (tx) => {
+      // trava as cargas (em ordem de id) e confere DE NOVO a versão aprovada: "Desfazer aprovação" trava
+      // a mesma linha, então ou já terminou (e a versão pode ter voltado a rascunho) ou espera esta
+      // confirmação (e vê a operação). Nunca operação apontando para uma versão que deixou de ser aprovada.
+      await tx.select({ id: schema.loadPlans.id }).from(schema.loadPlans).where(inArray(schema.loadPlans.id, toCreate)).orderBy(asc(schema.loadPlans.id)).for('no key update')
+      const approvedNow = new Map<number, number>()
+      for (const v of await tx
+        .select({ id: schema.loadPlanVersions.id, loadPlanId: schema.loadPlanVersions.loadPlanId })
+        .from(schema.loadPlanVersions)
+        .where(and(inArray(schema.loadPlanVersions.loadPlanId, toCreate), eq(schema.loadPlanVersions.status, 'APPROVED')))
+        .orderBy(desc(schema.loadPlanVersions.version)))
+        if (!approvedNow.has(v.loadPlanId)) approvedNow.set(v.loadPlanId, v.id)
       const created: number[] = []
       const confirmed: number[] = []
       const events: EventInsert[] = []
       for (const planId of toCreate) {
+        // aprovação desfeita no meio tempo
+        if (!approvedNow.has(planId)) {
+          if (planId === main) throw new PatchError('A carga precisa ter uma versão aprovada para confirmar o pedido.')
+          continue
+        }
         const [row] = await tx
           .insert(schema.exportOperations)
           .values({
             loadPlanId: planId,
-            confirmedVersionId: approved.get(planId)!,
+            confirmedVersionId: approvedNow.get(planId)!,
             status: 'CONFIRMED',
             confirmedAt,
             confirmedBy: me.id,

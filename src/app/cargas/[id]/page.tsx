@@ -16,6 +16,8 @@ import { unitNoun } from '@/lib/units'
 import { operationIdsByPlan } from '@/lib/exportTracking'
 import { EXPORT_STATUS_LABEL, EXPORT_STATUS_SHORT } from '@/domain/exportTracking'
 import { ConfirmOrderButton } from './ConfirmOrderButton'
+import { UndoApprovalButton } from './UndoApprovalButton'
+import { planUndoApproval } from '@/domain/approval'
 import { DeleteUnitButton } from './DeleteUnitButton'
 import { OrderRefField } from './OrderRefField'
 import { ValuePanel } from './ValuePanel'
@@ -118,6 +120,14 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
     ? units.filter((x) => x.id !== planId && approvedPlans.has(x.id) && !exportOps?.has(x.id)).map((x) => ({ loadPlanId: x.id, label: `${x.v ? unitNoun(x.v.document.space) : 'Unidade'} ${x.n} — ${x.name}` }))
     : []
 
+  // Desfazer aprovação: só a última versão, aprovada, sem pedido confirmado (com seguimento só aparece "Ver seguimento").
+  // Fora da exportação (ou sem ver o módulo) a operação é conferida à parte: o bloqueio vale para todos.
+  // desfazer aprovação: qualquer usuário que trabalha com cargas (decisão do Matías, 14/10/2026)
+  const undoCandidate = v.status === 'APPROVED' && can.editPlans(u.role)
+  const undoOp = exportOp ?? (undoCandidate && !exportOps ? (await operationIdsByPlan([planId])).get(planId) ?? null : null)
+  const undo = undoCandidate ? planUndoApproval(versions, v.id, { exportOperation: Boolean(undoOp) }) : null
+  const undoRestore = undo?.ok ? undo.restore?.version ?? null : null
+
   const editable = v.status === 'DRAFT' && can.editPlans(u.role)
   const [catalog, comps, containers, vehicles, profiles] = editable
     ? await Promise.all([
@@ -193,6 +203,7 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
             </SubmitButton>
           </form>
         )}
+        {undo?.ok && <UndoApprovalButton versionId={v.id} version={v.version} restoreVersion={undoRestore} />}
         {exportOp ? (
           <>
             <Link className="btn small" href={`/exportacoes/${exportOp.id}`} title="Exportações em curso: datas, booking, contêiner, chegada…">
@@ -217,6 +228,9 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
       {sp.erro === 'critico' && <div className="alert error">Não é possível aprovar: a versão salva tem alertas críticos.</div>}
       {sp.erro === 'emedicao' && <div className="alert error">Não é possível enviar para revisão nem aprovar: a carga está sendo editada por outro usuário agora. Tente quando ele terminar.</div>}
       {sp.erro === 'vazia' && <div className="alert error">Não é possível aprovar uma carga vazia.</div>}
+      {sp.erro === 'desfazerseguimento' && <div className="alert error">Este pedido já foi confirmado (Exportações em curso). Desfaça a confirmação no seguimento antes de desfazer a aprovação.</div>}
+      {sp.erro === 'desfazerversao' && <div className="alert error">Não é possível desfazer a aprovação: esta carga já tem uma versão mais nova. Só a última versão, se estiver aprovada, pode voltar para rascunho.</div>}
+      {sp.erro === 'desfazerstatus' && <div className="alert error">Não é possível desfazer a aprovação: esta versão não está aprovada (pode ter sido alterada por outra pessoa). Recarregue a página.</div>}
       {sp.erro === 'sempreco' && (
         <div className="alert error">
           Não é possível aprovar: produto(s) sem preço de exportação — <strong>{String(sp.skus ?? '').split(',').join(', ')}</strong>. Cadastre o preço da família/categoria em Preços exportação (ou confira o país/categoria do cliente) e aprove de novo.
@@ -225,7 +239,7 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
       {v.status !== 'DRAFT' && (
         <div className="alert warn">
           {READONLY_TEXT[v.status]} — somente leitura. {v.status === 'APPROVED' && `Aprovada por ${uname(v.approvedBy)} em ${dt(v.approvedAt)}. `}Para alterar, crie uma
-          nova versão.
+          nova versão{undo?.ok && ' ou desfaça a aprovação (a versão volta para rascunho)'}.
         </div>
       )}
       {editable && v.criticalCount > 0 && <div className="alert warn">A última gravação desta versão tem {v.criticalCount} alerta(s) crítico(s).</div>}
@@ -291,6 +305,8 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
             <Link className="btn" href={`/exportacoes/${exportOp.id}`}>
               🚢 Seguimento
             </Link>
+          ) : undo?.ok ? (
+            <UndoApprovalButton versionId={v.id} version={v.version} restoreVersion={undoRestore} className="danger" />
           ) : undefined
         }
         photoCount={(await db.select({ id: schema.loadPhotos.id }).from(schema.loadPhotos).where(eq(schema.loadPhotos.loadPlanId, planId))).length}

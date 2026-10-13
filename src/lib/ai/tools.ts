@@ -1,7 +1,7 @@
 import 'server-only'
 import { withNoneWorkArea } from '@/domain/shipmentType'
 import { fitNone } from '@/domain/noEquipment'
-import { allowedByLonaRule, BusinessArea, citesLonaLine, isRuleLona, LONA_RULE_TEXT } from '@/domain/lonaRule'
+import { BusinessArea, citesLonaLine, filterByLonaRule, isRuleLona, LONA_RULE_TEXT } from '@/domain/lonaRule'
 import { and, eq, inArray, like } from 'drizzle-orm'
 import { z } from 'zod'
 import { db, schema as s } from '@/db'
@@ -412,7 +412,7 @@ export const TOOLS = [
       if (i.family) cat = cat.filter((e) => e.family.toLowerCase().includes(i.family!.toLowerCase()))
       // regra das lonas até 14 m: exportação = Lona padrão (plana), mercado interno = BPF (se o pedido não citar a linha)
       const explicitLine = citesLonaLine(i.query)
-      if (ctx.area && !explicitLine) cat = cat.filter((e) => allowedByLonaRule(e.name, ctx.area!))
+      if (ctx.area) cat = filterByLonaRule(cat, ctx.area, i.query)
       const found = resolveProducts(i.query, cat, 5)
       const all = found.results
       const unambiguous = isUnambiguous(all)

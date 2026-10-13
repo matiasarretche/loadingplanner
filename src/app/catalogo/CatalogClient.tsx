@@ -1,6 +1,8 @@
 'use client'
 
 import { kitFamilyOf } from '@/domain/kitBoxes'
+import { eanStatusOf } from '@/domain/catalogImport/ean'
+import type { EanStatus } from '@/domain/catalogImport/types'
 import { useEffect, useMemo, useRef, useState, useTransition, Fragment } from 'react'
 import { kg, nf0, nf2, VERIFICATION_LABEL } from '@/components/format'
 
@@ -31,6 +33,12 @@ export interface CatalogRow {
   name: string
   /** marca comercial (Pacifil, EcoBag…) */
   brand: string
+  /** código de barras como veio da planilha oficial (texto); null = sem EAN */
+  ean: string | null
+  /** validade do código de barras: EAN-13, GTIN-14 (código da caixa) ou inválido */
+  eanStatus: EanStatus | null
+  /** código da caixa na tabela de caixas (attrs.codigo_caixa); null = não informado */
+  boxCode: string | null
   /** especificação resumida ("9 pés × 60 m · 210 µm", "10.000 L") */
   spec: string
   /** dados técnicos completos (dica) */
@@ -104,7 +112,7 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
         (r) =>
           (!famFilter || String(r.familyId) === famFilter) &&
           (!brandFilter || r.brand === brandFilter) &&
-          (!term || `${r.sku} ${r.name} ${r.line} ${r.brand} ${r.spec}`.toLowerCase().includes(term)),
+          (!term || `${r.sku} ${r.name} ${r.line} ${r.brand} ${r.spec} ${r.ean ?? ''} ${r.boxCode ?? ''}`.toLowerCase().includes(term)),
       ),
     [rows, famFilter, brandFilter, term],
   )
@@ -135,6 +143,8 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
       widthM: '',
       lengthM: '',
       lengthFt: '',
+      ean: '',
+      boxCode: '',
       notes: '',
       price: '',
       priceCurrency: 'USD',
@@ -167,6 +177,8 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
       widthM: dec(r.widthM),
       lengthM: dec(r.lengthM),
       lengthFt: dec(r.lengthFt),
+      ean: r.ean ?? '',
+      boxCode: r.boxCode ?? '',
       notes: r.notes,
       price: r.price != null ? dec(r.price) : '',
       priceCurrency: r.priceCurrency,
@@ -211,7 +223,7 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
       )}
 
       <div className="panel row" style={{ marginBottom: 12 }}>
-        <input placeholder="Buscar por código ou descrição…" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+        <input placeholder="Buscar por código, descrição, EAN ou caixa…" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
         <select value={famFilter} onChange={(e) => setFamFilter(e.target.value)}>
           <option value="">Todas as famílias</option>
           {families.map((f) => (
@@ -278,12 +290,13 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
                 <table className="data">
                   <thead>
                     <tr>
-                      <th>Código</th>
+                      <th>Cód.</th>
                       <th>Marca</th>
                       <th>Descrição</th>
                       <th>Especificação</th>
                       <TechHeaders familyName={f.name} />
-                      <th className="num">Caixa C × L × A (mm)</th>
+                      <th>Caixa</th>
+                      <th className="num">Medidas da caixa C × L × A (mm)</th>
                       <th className="num">Peso líquido</th>
                       <th className="num" title="Produto + caixa (sem palete)">Peso c/ embalagem</th>
                       <th className="num">Caixas / palete</th>
@@ -299,6 +312,7 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
                       <tr>
                         <td>
                           <strong>{r.sku}</strong>
+                          <EanInfo ean={r.ean} status={r.eanStatus} />
                         </td>
                         <td>
                           <span className={`brand-tag ${r.brand === 'Pacifil' ? 'own' : ''}`}>{r.brand}</span>
@@ -313,6 +327,7 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
                           {r.tech && <small className="muted"> ⓘ</small>}
                         </td>
                         <TechCells familyName={f.name} v={r} />
+                        <td style={{ whiteSpace: 'nowrap' }}>{r.boxCode ?? <span className="muted">—</span>}</td>
                         <td className="num">{r.pack ? `${nf0.format(r.pack.lengthMm)} × ${nf0.format(r.pack.widthMm)} × ${nf0.format(r.pack.heightMm)}` : <span className="badge UNVERIFIED">sem embalagem</span>}</td>
                         <td className="num" style={r.pack && r.pack.netKg <= 0 ? { color: 'var(--warn)' } : undefined}>
                           {r.pack ? (r.pack.netKg > 0 ? kg(r.pack.netKg) : 'não informado') : '—'}
@@ -364,6 +379,8 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
                               </small>
                             </td>
                             <TechCells familyName={f.name} v={r} />
+                            {/* meia caixa (79583-M) é código interno: não vai na coluna Caixa */}
+                            <td style={{ whiteSpace: 'nowrap' }}>{k === 'half' ? '—' : b.code}</td>
                             <td className="num">{`${nf0.format(b.dims.l)} × ${nf0.format(b.dims.w)} × ${nf0.format(b.dims.h)}`}</td>
                             <td className="num">{kg(b.capacity * kitNet)}</td>
                             <td className="num" title={`${b.capacity} kits × ${kg(kitGross)} + caixa ${kg(b.tareKg)}`}>{kg(b.capacity * kitGross + b.tareKg)}</td>
@@ -453,6 +470,46 @@ function Field({ label, error, children, unit, wide }: { label: string; error?: 
   )
 }
 
+/** EAN abaixo do código; selo quando não é um EAN-13 válido (GTIN-14 = código da caixa; inválido = conferir) */
+function EanInfo({ ean, status }: { ean: string | null; status: EanStatus | null }) {
+  if (!ean) return null
+  const st = status ?? eanStatusOf(ean).status
+  return (
+    <>
+      <br />
+      <small className="muted" style={{ whiteSpace: 'nowrap' }}>
+        EAN {ean}
+      </small>
+      {st === 'GTIN14' && (
+        <>
+          {' '}
+          <span className="badge INFO" style={{ whiteSpace: 'nowrap' }} title="GTIN-14 (DUN-14): código de barras da caixa, não o EAN da unidade">
+            GTIN-14 caixa
+          </span>
+        </>
+      )}
+      {st === 'INVALID' && (
+        <>
+          {' '}
+          <span className="badge WARNING" style={{ whiteSpace: 'nowrap' }} title={eanStatusOf(ean).note ?? 'EAN inválido'}>
+            EAN inválido
+          </span>
+        </>
+      )}
+    </>
+  )
+}
+
+/** dica ao digitar o EAN (não bloqueia: o EAN é guardado como veio, com o estado de validade) */
+function EanHint({ ean }: { ean: string }) {
+  const e = ean.trim()
+  if (!e) return null
+  const { status, note } = eanStatusOf(e)
+  if (status === 'EAN13') return <small className="muted">EAN-13 válido</small>
+  if (status === 'GTIN14') return <small className="muted">GTIN-14: código de barras da caixa</small>
+  return <small style={{ color: 'var(--warn)' }}>Inválido: {note}</small>
+}
+
 function ItemDialog({
   value,
   families,
@@ -526,7 +583,7 @@ function ItemDialog({
                 ))}
               </datalist>
             </Field>
-            <Field label="Código *" error={fe.sku}>
+            <Field label="Cód. *" error={fe.sku}>
               {txt('sku', { style: { textTransform: 'uppercase' } })}
             </Field>
             <Field label="Descrição *" error={fe.name} wide>
@@ -581,6 +638,13 @@ function ItemDialog({
         <fieldset>
           <legend>Caixa / embalagem</legend>
           <div className="form-grid">
+            <Field label="Caixa (cód.)" error={fe.boxCode}>
+              {txt('boxCode', { placeholder: 'ex.: 69490', inputMode: 'numeric' })}
+            </Field>
+            <Field label="EAN" error={fe.ean}>
+              {txt('ean', { placeholder: '13 dígitos (14 nos pacotes)', inputMode: 'numeric' })}
+              {!fe.ean && <EanHint ean={v.ean} />}
+            </Field>
             <Field label="Tipo de volume">{txt('packageType')}</Field>
             <Field label="Comprimento" unit="mm" error={fe.lengthMm}>
               {num('lengthMm', 'numeric')}

@@ -131,6 +131,12 @@ export interface PricingConfig {
   bandPrice?: Map<string, number>
   /** SKU (maiúsculas) → diâmetro em pés (catálogo), lido pelas famílias com faixas */
   skuDiameterFt?: Map<string, number>
+  /**
+   * SKUs (maiúsculas) que são ACOMPANHANTE obrigatório de algum produto (atributo acessorio_sku, ex.: KIT-HF).
+   * Só eles valem 0 numa família "incluído"; outro produto da mesma família fica SEM PREÇO (nunca USD 0
+   * calado). Ausente = configuração antiga: todos da família valem 0.
+   */
+  companionSkus?: Set<string>
 }
 
 /** Faixa de diâmetro (pés, inclusive) com USD/kg próprio */
@@ -404,8 +410,11 @@ export function quoteLineTotal(l: QuoteLine): { unitUsd: number | null; totalUsd
 export function quotePrice(cfg: PricingConfig, p: PricedProduct, countryCode: string | null | undefined, o: { agentId?: number | null; commissionPct?: number | null; incoterm?: string | null } = {}) {
   const list = priceForProduct(cfg, p, countryCode, { incoterm: o.incoterm })
   if (!list.ok) return { ...list, commission: null }
-  // incluído (KIT-HF): preço 0, sem comissão (não exige % do agente)
-  if (list.method === 'INCLUDED') return { ...list, baseUnitUsd: 0, unitUsd: 0, commission: null }
+  // incluído (KIT-HF): preço 0, sem comissão (não exige % do agente) — só para o acompanhante de outro produto
+  if (list.method === 'INCLUDED') {
+    if (cfg.companionSkus && !cfg.companionSkus.has(p.sku.toUpperCase())) return { ok: false as const, reason: includedNotCompanionReason(p.sku), category: list.category, commission: null }
+    return { ...list, baseUnitUsd: 0, unitUsd: 0, commission: null }
+  }
   const rate = o.commissionPct != null ? { pct: o.commissionPct, source: 'manual' as const } : o.agentId != null ? commissionRateFor(cfg, o.agentId, p.familyId) : null
   if (o.agentId != null && !rate) return { ...list, commission: { pct: null, source: null, commissionUsd: null, warning: 'sem % de comissão definido para esta família no perfil do agente' } }
   // preço final sempre PARA CIMA ao dólar inteiro
@@ -421,6 +430,10 @@ export function quotePrice(cfg: PricingConfig, p: PricedProduct, countryCode: st
   }
 }
 
+/** motivo do "sem preço" de um produto numa família "incluído" que não é acompanhante de nenhum produto */
+export const includedNotCompanionReason = (sku: string) =>
+  `a família de ${sku} é “incluído” (sem preço próprio), mas ${sku} não é acompanhante de nenhum produto: dê a ele uma família com preço`
+
 /** Configuração de preços em formato serializável (para telas que calculam no navegador). */
 export interface PricingPayload {
   categories: PricingConfig['categories']
@@ -435,6 +448,8 @@ export interface PricingPayload {
   familyBands: [number, PriceBand[]][]
   bandPrice: [string, number][]
   skuDiameterFt: [string, number][]
+  /** SKUs acompanhantes (ver PricingConfig.companionSkus); ausente em payloads antigos */
+  companionSkus?: string[]
   /** família e marca de cada SKU do catálogo (o peso líquido vem da embalagem) */
   products: { sku: string; familyId: number; brand: string | null }[]
   agents: { id: number; name: string }[]
@@ -452,5 +467,6 @@ export function configFromPayload(p: PricingPayload): PricingConfig {
     familyBands: new Map(p.familyBands ?? []),
     bandPrice: new Map(p.bandPrice ?? []),
     skuDiameterFt: new Map(p.skuDiameterFt ?? []),
+    companionSkus: p.companionSkus ? new Set(p.companionSkus) : undefined,
   }
 }

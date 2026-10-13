@@ -18,6 +18,8 @@ export const BODY_LIMITS = {
   emailPdf: 4.2 * MB,
   /** uma foto do carregamento (foto + versão média + miniatura) */
   photoUpload: 3.5 * MB,
+  /** importação do catálogo oficial (Manutenção): planilha de produtos + tabela de caixas, juntas */
+  catalogImport: 4.2 * MB,
 }
 
 /** imagens dos anexos da IA: lado maior (o modelo reduz tudo o que passar disso) e qualidade JPEG */

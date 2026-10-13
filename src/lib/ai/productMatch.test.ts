@@ -81,3 +81,64 @@ describe('Hydroforce × Hidrosilo', () => {
     expect(resolveProducts('hidrosilo de 10 mil', list).results[0].item.sku).toBe('HS-10K')
   })
 })
+
+describe('códigos oficiais numéricos', () => {
+  const list = [
+    // código 20000 existe na planilha oficial (Hidrosilo 2,15 × 25 m), sem capacidade no cadastro
+    { sku: '20000', name: 'Hidrosilo 2,15 × 25 m × 500 µm', family: 'Hidrosilo', line: 'Hidrosilo', brand: 'Pacifil', attrs: { largura_m: 2.15, comprimento_m: 25 } },
+    { sku: '17313', name: 'Hidrosilo 2 × 20 m × 600 µm — 20.000 L', family: 'Hidrosilo', line: 'Hidrosilo', brand: 'Pacifil', attrs: { capacidade_l: 20000, largura_m: 2, comprimento_m: 20 } },
+    { sku: '17308', name: 'Hidrosilo 2 × 10 m × 600 µm — 10.000 L', family: 'Hidrosilo', line: 'Hidrosilo', brand: 'Pacifil', attrs: { capacidade_l: 10000, largura_m: 2, comprimento_m: 10 } },
+    { sku: '19712', name: 'Lona BPF 8 × 50 m × 150 µm (natural)', family: 'Lona de silagem', line: 'Lona BPF', brand: 'Pacifil', attrs: { largura_m: 8, comprimento_m: 50, espessura_um: 150 } },
+    { sku: '14412', name: 'Lona BPF 8 × 50 m × 125 µm', family: 'Lona de silagem', line: 'Lona BPF', brand: 'Pacifil', attrs: { largura_m: 8, comprimento_m: 50, espessura_um: 125 } },
+  ]
+  const topN = (q: string) => rankProducts(q, list)[0]?.item.sku
+  it('capacidade em litros não é confundida com o código', () => {
+    for (const q of ['hidrosilo 20.000 L', 'hidrosilo 20000 L', 'hidrosilo de 20000 litros', 'hidro 20 mil', 'hidrosilo 20k']) {
+      const r = rankProducts(q, list)
+      expect(r[0].item.sku).toBe('17313')
+      expect(r.find((x) => x.item.sku === '20000')?.reasons ?? []).not.toContain('código exato')
+    }
+  })
+  it('código citado sozinho ou no meio do texto vence', () => {
+    expect(topN('19712')).toBe('19712')
+    expect(topN('quero 10 do 19712')).toBe('19712')
+    expect(topN('cód. 14412')).toBe('14412')
+    expect(rankProducts('19712', list)[0]).toMatchObject({ score: 100, reasons: ['código exato'] })
+    expect(isUnambiguous(resolveProducts('19712', list).results)).toBe(true)
+  })
+  it('sem "código parcial" nos códigos numéricos', () => {
+    expect(rankProducts('1971', list).some((r) => r.reasons.includes('código parcial'))).toBe(false)
+    expect(rankProducts('197120', list).some((r) => r.reasons.includes('código exato'))).toBe(false)
+  })
+  it('medidas da lona não viram código', () => {
+    const r = rankProducts('lona bpf 8 x 50 150 micras', list)
+    expect(r[0].item.sku).toBe('19712')
+    expect(r.every((x) => !x.reasons.includes('código exato'))).toBe(true)
+  })
+})
+
+describe('código oficial que também é capacidade (20000)', () => {
+  const list = [
+    // código 20000 da planilha oficial: Hidrosilo 2,15 × 25 m de 20.000 L (outra caixa e outro palete)
+    { sku: '20000', name: 'Hidrosilo 2,15 × 25 m × 500 µm — 20.000 L (filme 4,3 m)', family: 'Hidrosilo', line: 'Hidrosilo', brand: 'Pacifil', attrs: { capacidade_l: 20000, largura_filme_m: 4.3 } },
+    { sku: '17313', name: 'Hidrosilo 2 × 20 m × 600 µm — 20.000 L', family: 'Hidrosilo', line: 'Hidrosilo', brand: 'Pacifil', attrs: { capacidade_l: 20000, largura_filme_m: 4 } },
+    { sku: '18004', name: 'Hidrosilo 2 × 20 m × 600 µm — 20.000 L', family: 'Hidrosilo', line: 'Hidrosilo', brand: 'Pacifil', attrs: { capacidade_l: 20000, largura_filme_m: 4 } },
+    { sku: '17308', name: 'Hidrosilo 2 × 10 m × 600 µm — 10.000 L', family: 'Hidrosilo', line: 'Hidrosilo', brand: 'Pacifil', attrs: { capacidade_l: 10000, largura_filme_m: 4 } },
+  ]
+  it('"hidrosilo 20000" é capacidade: não escolhe o código 20000 sozinho', () => {
+    for (const q of ['hidrosilo 20000', '2 hidrosilos de 20000', 'hidro 20000']) {
+      const r = resolveProducts(q, list).results
+      expect(isUnambiguous(r)).toBe(false)
+      expect(r.map((x) => x.item.sku)).toEqual(expect.arrayContaining(['20000', '17313', '18004']))
+      expect(r.find((x) => x.item.sku === '20000')?.reasons ?? []).not.toContain('código exato')
+    }
+  })
+  it('o número sozinho ou com o código marcado continua sendo o código', () => {
+    for (const q of ['20000', 'código 20000', 'cód. 20000', '#20000']) {
+      const r = resolveProducts(q, list).results
+      expect(r[0].item.sku).toBe('20000')
+      expect(r[0].reasons).toContain('código exato')
+      expect(isUnambiguous(r)).toBe(true)
+    }
+  })
+})

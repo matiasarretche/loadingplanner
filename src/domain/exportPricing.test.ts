@@ -147,6 +147,17 @@ describe('preços de exportação', () => {
   it('incluído (KIT-HF) via agente: 0, sem comissão e sem exigir % (não fica sem preço)', () => {
     expect(quotePrice(cfg, { sku: 'KIT-HF', familyId: 30, netKg: 2 }, 'UY', { agentId: 7 })).toMatchObject({ ok: true, unitUsd: 0, commission: null })
   })
+  it('família "incluído": só o acompanhante vale 0; outro produto dela fica SEM PREÇO (nunca USD 0 calado)', () => {
+    const c: PricingConfig = { ...cfg, companionSkus: new Set(['KIT-HF']) }
+    expect(quotePrice(c, { sku: 'kit-hf', familyId: 30, netKg: 2 }, 'UY')).toMatchObject({ ok: true, unitUsd: 0, commission: null })
+    const tape = quotePrice(c, { sku: '17712', familyId: 30, netKg: 4.94 }, 'UY', { agentId: 7 })
+    expect(tape.ok).toBe(false)
+    expect(!tape.ok && tape.reason).toContain('não é acompanhante')
+    // o payload do navegador leva a lista de acompanhantes
+    const back = configFromPayload({ categories: c.categories, countryCategory: [...c.countryCategory], familyRule: [...c.familyRule], familyPrice: [...c.familyPrice], brandAdjust: [], commission: [], priceTwin: [], familyBands: [], bandPrice: [], skuDiameterFt: [], companionSkus: ['KIT-HF'], products: [], agents: [] })
+    expect(quotePrice(back, { sku: '17712', familyId: 30, netKg: 4.94 }, 'UY').ok).toBe(false)
+    expect(quotePrice(back, { sku: 'KIT-HF', familyId: 30, netKg: 2 }, 'UY')).toMatchObject({ ok: true, unitUsd: 0 })
+  })
   it('preço manual na cotização não depende da tabela', () => {
     expect(quoteLineTotal({ sku: 'SB', quantity: 3, calculatedUnitUsd: 200 })).toMatchObject({ unitUsd: 200, totalUsd: 600, manual: false })
     expect(quoteLineTotal({ sku: 'SB', quantity: 3, calculatedUnitUsd: 200, overrideUnitUsd: 190 })).toMatchObject({ unitUsd: 190, totalUsd: 570, manual: true })
@@ -224,6 +235,32 @@ describe('preços de exportação', () => {
     })
     it('3 m sem Hidrosilo 2 m da mesma capacidade: sem preço (não cai no cálculo por kg)', () => {
       expect(quotePrice(c, { sku: 'HS-3M-35K', familyId: 20, netKg: 50 }, 'MX')).toMatchObject({ ok: false, reason: NO_TWIN_REASON })
+    })
+    it('códigos oficiais numéricos: o 3 m acha o 2 m ATIVO pela largura + capacidade (nunca pelo código)', () => {
+      const t = buildPriceTwins([
+        // catálogo antigo, desativado pela importação: nunca é referência
+        { sku: 'HS-2M-10K', family: 'Hidrosilo', brand: 'Pacifil', widthM: 2, capacityL: 10000, netKg: 22.37, active: false },
+        { sku: 'HS-3M-10K', family: 'Hidrosilo', brand: 'Pacifil', widthM: 3, capacityL: 10000, netKg: 16.78, active: false },
+        // catálogo oficial
+        { sku: '18137', family: 'Hidrosilo', brand: 'Pacifil', widthM: 3, capacityL: 10000, netKg: 16.78, active: true },
+        { sku: '17308', family: 'Hidrosilo', brand: 'Pacifil', widthM: 2, capacityL: 10000, netKg: 22.37, active: true },
+        { sku: '18074', family: 'Hidroforce', brand: 'Pacifil', widthM: 2, capacityL: 10000, netKg: 14.54, active: true },
+        { sku: '17640', family: 'Hidrosilo', brand: 'Pacifil', widthM: 2.15, capacityL: 10000, netKg: 30, active: true },
+        // 3 m sem capacidade cadastrada (ex.: 19790, 3 × 22 m): sem equivalente
+        { sku: '19790', family: 'Hidrosilo', brand: 'Pacifil', widthM: 3, capacityL: null, netKg: 61.51, active: true },
+      ])
+      expect(t.get('18137')).toEqual({ sku: '17308', netKg: 22.37 })
+      // o 3 m antigo (cargas salvas) também passa a usar o 2 m ativo do catálogo oficial
+      expect(t.get('HS-3M-10K')).toEqual({ sku: '17308', netKg: 22.37 })
+      expect(t.get('19790')).toBeNull()
+      // 2 m, 2,15 m e Hidroforce 2 m não entram no mapa
+      expect(t.has('17308')).toBe(false)
+      expect(t.has('17640')).toBe(false)
+      expect(t.has('18074')).toBe(false)
+      // preço do 3 m = preço do 2 m (Hidrosilo por kg + fixo)
+      const ct: PricingConfig = { ...c, priceTwin: t }
+      const p2 = quotePrice(ct, { sku: '17308', familyId: 20, netKg: 22.37 }, 'MX') as { unitUsd: number }
+      expect(quotePrice(ct, { sku: '18137', familyId: 20, netKg: 16.78 }, 'MX')).toMatchObject({ ok: true, unitUsd: p2.unitUsd, priceAs: { sku: '17308' } })
     })
   })
   describe('Silo-bolsa: USD/kg por faixa de diâmetro', () => {

@@ -1,5 +1,6 @@
 import type { RoadSetup } from './axles'
 import type { Dims, Orientation, Vec3 } from './geometry'
+import type { PackShape } from './packShape'
 
 export type Verification = 'VERIFIED' | 'ESTIMATED' | 'UNVERIFIED'
 
@@ -38,6 +39,11 @@ export interface PackSnapshot {
    * unitsPerPackage = kits dentro; `unit` guarda a caixa individual do catálogo (ver domain/kitBoxes).
    */
   kitBox?: KitBoxSnapshot
+  /**
+   * Formato do volume para o desenho 3D (ver domain/packShape): 'ROLL' = lona/filme em rolo
+   * (catálogo: attrs.formato = 'rolo'). Ausente = caixa comum (ou snapshot antigo: vale o SKU LS-… / o nome).
+   */
+  shape?: PackShape
 }
 
 export interface KitBoxSnapshot {

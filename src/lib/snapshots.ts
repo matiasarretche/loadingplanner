@@ -2,6 +2,7 @@ import type { schema } from '@/db'
 import { skuColor } from '@/domain/colors'
 import { companionsFromAttrs } from '@/domain/companions'
 import { isOrientation, Orientation } from '@/domain/geometry'
+import { shapeFromAttrs } from '@/domain/packShape'
 import type { AxleProfileSnapshot, CarrierSnapshot, TractorSnapshot } from '@/domain/axles'
 import type { LimitSnapshot, PackSnapshot, PalletTypeSnapshot, SpaceSnapshot } from '@/domain/types'
 
@@ -36,6 +37,8 @@ export function packSnapshot(pv: PV, v: Variant): PackSnapshot {
     price: v.price != null ? { amount: v.price, currency: v.priceCurrency ?? 'USD', per: v.priceUnit ?? 'UNIT' } : null,
     ...(companionsFromAttrs(v.attrs).length ? { companions: companionsFromAttrs(v.attrs) } : {}),
     boxesPerPallet: pv.unitsPerPallet ?? null,
+    // lona/filme em rolo (attrs.formato = 'rolo'): o 3D desenha o rolo nas pontas; sem formato a chave nem entra
+    ...(shapeFromAttrs(v.attrs) ? { shape: 'ROLL' as const } : {}),
   }
 }
 

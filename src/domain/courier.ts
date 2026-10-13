@@ -8,6 +8,7 @@
  */
 import type { KitBoxLine } from './kitBoxes'
 import type { OrderLine } from './mixedPallets'
+import type { PackShape } from './packShape'
 
 export const COURIER_DIVISOR_DEFAULT = 5000
 
@@ -82,6 +83,8 @@ export interface CourierBox {
   sku: string
   name: string
   color: string
+  /** formato do volume para o 3D (lona/filme em rolo); ausente = caixa comum — ver domain/packShape */
+  shape?: PackShape
   min: { x: number; y: number; z: number }
   size: { x: number; y: number; z: number }
 }
@@ -137,7 +140,7 @@ export function courierLayout(order: OrderLine[], o: { stack?: boolean; maxStack
       rowDepth = 0
     }
     for (let k = 0; k < c.count; k++) {
-      boxes.push({ n: c.first + k, sku: c.pack.sku, name: c.pack.name, color: c.pack.color, min: { x, y, z: k * d.h }, size: { x: d.l, y: d.w, z: d.h } })
+      boxes.push({ n: c.first + k, sku: c.pack.sku, name: c.pack.name, color: c.pack.color, ...(c.pack.shape ? { shape: c.pack.shape } : {}), min: { x, y, z: k * d.h }, size: { x: d.l, y: d.w, z: d.h } })
     }
     maxZ = Math.max(maxZ, c.count * d.h)
     maxX = Math.max(maxX, x + d.l)

@@ -690,7 +690,10 @@ export async function buildOrderPdf(d: OrderPdfData, images: Uint8Array[], brand
     ...(hasPrice ? [p.unitPrice != null ? money(p.unitPrice) : '—', p.amount != null ? money(p.amount) : '—'] : []),
   ])
   const tt = d.totals
-  rows.push([t.totalRow, '', nf(tt.boxes), nf(tt.units), '', nf(tt.netKg, 1), nf(tt.goodsGrossKg, 1), nf(tt.payloadKg, 1), ...(hasPrice ? ['', ''] : [])])
+  // total USD da mercadoria = soma das linhas com preço (moeda diferente de USD em alguma linha → "—")
+  const priced = d.products.filter((p) => p.amount != null)
+  const goodsUsd = priced.every((p) => (p.currency ?? 'USD') === 'USD') ? priced.reduce((s, p) => s + (p.amount ?? 0), 0) : null
+  rows.push([t.totalRow, '', nf(tt.boxes), nf(tt.units), '', nf(tt.netKg, 1), nf(tt.goodsGrossKg, 1), nf(tt.payloadKg, 1), ...(hasPrice ? ['', goodsUsd != null && priced.length ? money(goodsUsd) : '—'] : [])])
   w.table(cols, rows, true, { icons: d.products.map(sealOf), iconCol: 0, iconSize: SEAL })
   // legenda do selo: o que é a tecnologia (uma vez por tecnologia com selo nos itens)
   for (const [key, img] of sealImgs) {

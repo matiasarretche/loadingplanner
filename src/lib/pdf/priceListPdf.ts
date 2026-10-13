@@ -98,8 +98,37 @@ const T: Record<PdfLang, {
   },
 }
 
-/** Hidrosilo e Hydroforce: a espessura (600 µm) não vai na lista */
+/** Hidrosilo e Hydroforce: a espessura (600 µm) não vai na lista — a não ser que o grupo tenha mais de uma */
 const hideThickness = (family: string) => /hidrosilo|hidroforce|hydroforce/i.test(family)
+
+/** textos da descrição montada dos reservatórios, por idioma */
+const TANK: Record<PdfLang, { pack: (n: string) => string; film: (m: string) => string }> = {
+  pt: { pack: (n) => `c/${n} un.`, film: (m) => `filme ${m} m` },
+  es: { pack: (n) => `c/${n} u.`, film: (m) => `film ${m} m` },
+  en: { pack: (n) => `pack of ${n}`, film: (m) => `film ${m} m` },
+}
+
+/** número no idioma da lista: inteiro sem casas, decimais como escritos (2,15 — nunca arredondado para 2,2) */
+const numFmt = (locale: string) => {
+  const f = new Intl.NumberFormat(locale, { minimumFractionDigits: 0, maximumFractionDigits: 3, useGrouping: 'always' } as Intl.NumberFormatOptions)
+  return (v: number) => f.format(v)
+}
+
+/**
+ * Descrição do produto na lista. Hidrosilo / Hidroforce: montada no idioma da lista a partir das medidas
+ * ("Hidrosilo 2,15 m × 25 m — 20.000 litros"), com o que distingue tanques de mesma medida: Plus X3,
+ * válvulas (4V), pacote (c/15 un.), largura do filme aberto quando o cadastro descreve o produto por ela e,
+ * se `withThickness`, a espessura. Demais famílias: o nome do catálogo (distingue BPF, padrão, LP…).
+ */
+export function priceListProductText(family: string, r: PriceListRow, lang: PdfLang, withThickness = false): string {
+  if (!hideThickness(family) || !r.widthM || !r.lengthM) return r.name
+  const locale = T[lang].locale
+  const nd = numFmt(locale)
+  const tt = TANK[lang]
+  const head = `${family}${r.plusX3 ? ' Plus X3' : ''} ${nd(r.widthM)} m × ${nd(r.lengthM)} m${withThickness && r.thicknessUm ? ` × ${nd(r.thicknessUm)} µm` : ''}`
+  const extras = [r.valves ? `${nd(r.valves)}V` : null, r.unitsPerPack ? tt.pack(nd(r.unitsPerPack)) : null, r.filmWidthM ? tt.film(nd(r.filmWidthM)) : null, r.brand !== 'Pacifil' ? r.brand : null].filter(Boolean)
+  return `${head}${r.capacityL ? ` — ${nd(r.capacityL)} ${T[lang].liters}` : ''}${extras.length ? ` (${extras.join(', ')})` : ''}`
+}
 
 export async function buildPriceListPdf(data: PriceListData, o: PriceListOptions): Promise<Uint8Array> {
   const t = T[o.lang]
@@ -122,10 +151,7 @@ export async function buildPriceListPdf(data: PriceListData, o: PriceListOptions
   const nf = (v: number, d = 0) => new Intl.NumberFormat(t.locale, { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: 'always' } as Intl.NumberFormatOptions).format(v)
   w.header(`${t.title}${famTxt ? ` — ${famTxt.toUpperCase()}` : ''}`, t.sub(data.incoterm), t.dates(issued, valid), 'Pacifil Brasil')
 
-  // descrição do produto a partir do catálogo: "Hidrosilo 2 m × 3 m — 2.000 litros"
-  // Hidrosilo / Hydroforce: montada das medidas; demais famílias: o nome do catálogo (distingue BPF, padrão, LP…)
-  const product = (family: string, r: PriceListRow) =>
-    hideThickness(family) && r.widthM && r.lengthM ? `${family} ${nf(r.widthM, r.widthM % 1 ? 1 : 0)} m × ${nf(r.lengthM, r.lengthM % 1 ? 1 : 0)} m${r.capacityL ? ` — ${nf(r.capacityL)} ${t.liters}` : ''}${r.brand !== 'Pacifil' ? ` (${r.brand})` : ''}` : r.name
+  const nd = numFmt(t.locale)
   const width = A4.w - 2 * M
   // PACIFIL NXT: um quadro destacado no início (uma vez) e a menção em cada grupo das famílias NXT do Catálogo;
   // nas famílias com SELO (Hidrosilo) o selo vai junto da menção (e no quadro do início)
@@ -140,7 +166,10 @@ export async function buildPriceListPdf(data: PriceListData, o: PriceListOptions
   for (const g of data.groups) {
     // coluna do código na largura do maior código DO GRUPO (sem quebrar "AC-PAC-2.3X50-240")
     const codeW = Math.min(118, Math.max(62, ...g.rows.map((r) => w.textWidth(r.sku, 8.5) + 8)))
-    const showThick = cols.thickness && !hideThickness(g.family)
+    // reservatórios: espessura só quando o grupo mistura espessuras (500 × 600 µm); sem a coluna, vai no texto
+    const mixedThick = new Set(g.rows.map((r) => r.thicknessUm ?? 0)).size > 1
+    const showThick = cols.thickness && (!hideThickness(g.family) || mixedThick)
+    const thickInText = hideThickness(g.family) && mixedThick && !showThick
     // ordem: código · PRODUTO · PREÇO (os dois destacados) · espessura · caixa · unid./palete · pesos
     const colDefs: { key: string; title: string; w: number; align?: 'right'; strong?: boolean }[] = [
       { key: 'code', title: t.cols.code, w: codeW },
@@ -170,7 +199,8 @@ export async function buildPriceListPdf(data: PriceListData, o: PriceListOptions
     // reserva a altura REAL da descrição (limitada a meia página: descrição enorme quebra normalmente)
     const descH = descLines.length ? Math.min(descLines.length * 9.5 + 3, A4.h / 2) : 0
     w.ensure(31 + descH + tagH(mode) + 1 + 30 + 2 * 22)
-    w.section(t.group(g.family, g.label))
+    // largura do grupo no idioma da lista ("2,15 m" / "2.15 m"), igual às linhas
+    w.section(t.group(g.family, g.widthM ? `${nd(g.widthM)} m` : g.label))
     if (mode === 'SEAL' && seal) {
       // selo à esquerda (topo logo abaixo do traço da seção) e a menção centralizada ao lado
       const sw = (seal.width / seal.height) * SEAL_TAG
@@ -196,7 +226,7 @@ export async function buildPriceListPdf(data: PriceListData, o: PriceListOptions
       g.rows.map((r) => {
         const cell: Record<string, string> = {
           code: r.sku,
-          product: product(g.family, r),
+          product: priceListProductText(g.family, r, o.lang, thickInText),
           thick: r.thicknessUm ? `${nf(r.thicknessUm)} µm` : '—',
           box: r.box ? `${nf(r.box.l)} × ${nf(r.box.w)} × ${nf(r.box.h)}` : '—',
           perPallet: r.unitsPerPallet ? `${nf(r.unitsPerPallet)}${r.palletCode?.includes('DUPLO') ? '*' : ''}` : '—',

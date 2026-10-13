@@ -45,18 +45,25 @@ const norm = (s: string) =>
 /**
  * Etiqueta da marca pelo código e nome do produto (os snapshots das cargas guardam os dois).
  * Sem correspondência clara → null (a caixa fica só com a identificação do produto).
+ * Os códigos oficiais (catálogo importado da planilha) são NUMÉRICOS: a linha e a marca saem do NOME
+ * ("Silo-bolsa Ecobag 9 pés …", "Lona BPF 8 × 50 m …", "Hidrosilo 2 × 10 m …"); os prefixos de código
+ * (SB-, HS-, LS-…) continuam valendo para cargas antigas.
  */
 export function brandLabelFor(p: { sku: string; name: string }): BrandLabel | null {
   const sku = norm(p.sku)
   // acessórios (ex.: KIT-HF) vão em caixa própria, sem o adesivo do produto principal
   if (/^KIT-/.test(sku)) return null
   const name = norm(p.name)
+  // fitas, adesivo de reparo, filmes em rolo e hidropeso: sem adesivo de marca cadastrado (o nome cita
+  // "silo-bolsa"/"Hidrosilo"/"BPF", mas não são o produto principal)
+  if (/^(FITA|CAIXA DE FITAS|ADESIVO|FILME|HIDROPESO)\b/.test(name)) return null
   const t = `${sku} ${name}`
   const B = BRAND_LABELS
   const isHF = /^HF-/.test(sku) || /\bH[IY]DROFORCE\b/.test(name)
   const isHS = /^HS-/.test(sku) || /\bH[IY]DROSILO\b/.test(name)
   const isSB = /^SB-/.test(sku) || /SILO-?\s?BOLSA/.test(name)
   const isBPF = /-BPF$/.test(sku) || /\bBPF\b/.test(name)
+  const isTarp = /^LS-/.test(sku) || /^LONA\b/.test(name)
   // bolsas para silagem: sem adesivo cadastrado (o da Agromai é de lona para silo)
   if (/^BS-/.test(sku) || /BOLSA PARA SILAGEM/.test(name)) return null
   // marcas de clientes (private label)
@@ -68,9 +75,11 @@ export function brandLabelFor(p: { sku: string; name: string }): BrandLabel | nu
   if (isHF) return B.hidroforcePacifil
   if (isHS) return B.hidrosiloPacifil
   if (/^AC-/.test(sku) || /ANIMAL COMFORT|TECHO PARA GANADO/.test(name)) return B.animalComfort
-  if (/^SB-PRO-/.test(sku) || /PROBAG/.test(name)) return B.silobolsaProbag
-  if (/^SB-ECO-/.test(sku) || /ECOBAG/.test(t)) return isBPF ? B.bpfEcobag : B.silobolsaEcobag
+  // BigSafe antes da marca: "Lona BigSafe Ecobag" leva o adesivo BigSafe (não o de silo-bolsa Ecobag)
   if (/BIG\s?SAFE/.test(name)) return B.bigsafe
+  if (/^SB-PRO-/.test(sku) || /PROBAG/.test(name)) return B.silobolsaProbag
+  // Ecobag: lona BPF → adesivo BPF Ecobag; outras lonas Ecobag (padrão, Plus…) não têm adesivo cadastrado
+  if (/^SB-ECO-/.test(sku) || /ECOBAG/.test(t)) return isBPF ? B.bpfEcobag : isTarp ? null : B.silobolsaEcobag
   if (isBPF) return B.bpfPacifil
   // silo-bolsa sem marca no código/nome = Pacifil (regra de marca do sistema); ADP e Bridon não têm adesivo cadastrado
   if (isSB && !/^SB-(ADP|BRI)-/.test(sku) && !/\b(ADP|BRIDON|BRYDON)\b/.test(name)) return B.silobolsaPacifil

@@ -10,12 +10,13 @@ import { editPalletItems, itemToSpace, localObstacles, palletLocalBounds, spaceD
 import { loadGeometries, palletParts, roadAxles, validateLoad, shortUnitLabel } from '@/domain/load'
 import { adaptRoad, AXLE_COLOR, AxlePanel, RoadOptions } from './AxlePanel'
 import { brandLabelFor } from '@/domain/brandLabels'
+import { isRollPack } from '@/domain/packShape'
 import { newPhysicalCriticals } from '@/domain/issues'
 import { isOutsideSpace } from '@/domain/staging'
 import { itemBox, palletEnvelope, palletSummary } from '@/domain/pallet'
 import { dropZ, findFreePosition, placementProblem, restZ } from '@/domain/placement'
 import { boxObstacles, placeLooseBoxes } from '@/domain/autoload'
-import { placeMixedPalletsInLoad } from '@/domain/mixedLoad'
+import { palletDisplayName, placeMixedPalletsInLoad, plannerPalletName } from '@/domain/mixedLoad'
 import { addBoxesToMixed } from '@/domain/mixedPallets'
 import { groupsOfDoc, planNotes, splitIntoUnits } from '@/domain/multiUnit'
 import { MultiUnitPanel } from './MultiUnitPanel'
@@ -261,7 +262,7 @@ export function LoadEditor({ initial, compositions, catalog, spaces, profiles, e
             const k = innerPallet.packs[it.packId]
             if (!k) return []
             const w = itemToSpace(innerPallet, innerUnit, it)
-            return [{ id: `item:${it.id}`, min: w.min, size: w.size, color: colorOf.get(k.sku) ?? k.color, print: k.sku, brand: brandLabelFor(k) ?? undefined, selected: innerSel === it.id, locked: it.locked || readOnly }]
+            return [{ id: `item:${it.id}`, min: w.min, size: w.size, color: colorOf.get(k.sku) ?? k.color, print: k.sku, brand: brandLabelFor(k) ?? undefined, roll: isRollPack(k), selected: innerSel === it.id, locked: it.locked || readOnly }]
           }),
         ]
       : []
@@ -272,17 +273,19 @@ export function LoadEditor({ initial, compositions, catalog, spaces, profiles, e
     let color = '#999'
     let print: string | undefined
     let brand: SceneBody['brand']
+    let roll = false
     if (u.kind === 'PALLET') {
       const p = shown.pallets[u.palletKey]
       parts = palletParts(p, u).map((x) => {
         const k = x.packId ? p.packs[x.packId] : undefined
-        return { min: x.box.min, size: x.box.size, color: k ? colorOf.get(k.sku) ?? k.color : '#b48a5a', print: k?.sku, brand: k ? brandLabelFor(k) ?? undefined : undefined }
+        return { min: x.box.min, size: x.box.size, color: k ? colorOf.get(k.sku) ?? k.color : '#b48a5a', print: k?.sku, brand: k ? brandLabelFor(k) ?? undefined : undefined, roll: isRollPack(k) }
       })
     } else {
       const k = shown.packs[u.packId]
       color = k ? colorOf.get(k.sku) ?? k.color : '#999'
       print = k?.sku
       brand = k ? brandLabelFor(k) ?? undefined : undefined
+      roll = isRollPack(k)
     }
     return [
       {
@@ -293,6 +296,7 @@ export function LoadEditor({ initial, compositions, catalog, spaces, profiles, e
         color,
         print,
         brand,
+        roll,
         dim: Boolean(innerUnit),
         label: `${staged.has(u.id) ? 'FORA DA CARGA · ' : ''}${shortUnitLabel(u, shown.units.indexOf(u))}${u.kind === 'PACKAGE' && !u.label ? ` · ${shown.packs[u.packId]?.sku ?? ''}` : ''}`,
         selected: selection.includes(u.id),
@@ -785,7 +789,7 @@ export function LoadEditor({ initial, compositions, catalog, spaces, profiles, e
     // não coube tudo: propõe o pedido em várias unidades (1ª cheia, remanente na última) em vez de deixar paletes de fora
     if (r.failed.length && saveMulti && !isNone) {
       const cur = groupsOfDoc(doc)
-      const extra = pallets.map((p, i) => ({ key: `${stamp}_${i + 1}`, pallet: { ...p, name: `Misto ${i + 1} · ${[...new Set(Object.values(p.packs).map((k) => k.sku))].join('+')}` }, count: 1 }))
+      const extra = pallets.map((p, i) => ({ key: `${stamp}_${i + 1}`, pallet: { ...p, name: plannerPalletName(p, i + 1) }, count: 1 }))
       const plan = splitIntoUnits(doc, [...cur.pallets, ...extra], cur.loose, { alternatives: spaces })
       if (plan.units.length > 1) {
         openMulti(plan.units.map((u) => u.doc), planNotes(plan))
@@ -1923,7 +1927,7 @@ function UnitCard({ doc, g, colorOf, onClose }: { doc: LoadDoc; g: ReturnType<ty
         </button>
       </div>
       <div className="muted" style={{ fontSize: 11 }}>
-        {p ? `${p.name} · ${p.palletType.code}` : 'Volume solto'}
+        {p ? `${palletDisplayName(p)} · ${p.palletType.code}` : 'Volume solto'}
         {counts?.partial && ` · PARCIAL ${counts.boxes} de ${counts.fullBoxes} caixas`}
         {u.pos.z > 0 && ' · empilhado'}
       </div>

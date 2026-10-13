@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic'
 import { useMemo, useState } from 'react'
 import type { CourierLayout } from '@/domain/courier'
 import { brandLabelFor } from '@/domain/brandLabels'
+import { isRollPack } from '@/domain/packShape'
 import type { CaptureFn, SceneBody, ViewPreset } from '../three/Scene3D'
 import { ViewButtons } from '../editor/ui'
 
@@ -17,7 +18,7 @@ export function CourierView({ layout, onCaptureReady }: { layout: CourierLayout;
   const [nonce, setNonce] = useState(0)
   const [labels, setLabels] = useState(true)
   const bodies: SceneBody[] = useMemo(
-    () => layout.boxes.map((b) => ({ id: `v${b.n}`, min: b.min, size: b.size, color: b.color, print: `${b.n} · ${b.sku}`, brand: brandLabelFor(b) ?? undefined, label: String(b.n) })),
+    () => layout.boxes.map((b) => ({ id: `v${b.n}`, min: b.min, size: b.size, color: b.color, print: `${b.n} · ${b.sku}`, brand: brandLabelFor(b) ?? undefined, roll: isRollPack(b), label: String(b.n) })),
     [layout],
   )
   // um pouco de altura extra para a câmera enquadrar caixas baixas

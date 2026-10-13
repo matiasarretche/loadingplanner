@@ -3,6 +3,7 @@ import { noneMetrics } from '@/domain/noEquipment'
 import { serviceOf, TYPE_INFO } from '@/domain/shipmentType'
 import { palletBoxCounts } from '@/domain/partial'
 import { palletSummary } from '@/domain/pallet'
+import { palletDisplayName } from '@/domain/mixedLoad'
 import { palletTareBySku } from '@/domain/weights'
 import { kitBoxLines, kitFamilyOf } from '@/domain/kitBoxes'
 import type { PackSnapshot } from '@/domain/types'
@@ -34,8 +35,10 @@ export function orderPdfData(data: PlanData, rank?: Map<string, number>, given?:
     const p = doc.pallets[g.unit.palletKey]
     const c = palletBoxCounts(p)
     const ps = palletSummary(p)
-    const key = `${p.name}|${c.boxes}|${Math.round(ps.grossKg)}`
-    const cur = groups.get(key) ?? { name: p.name, count: 0, boxes: c.boxes, fullBoxes: c.partial ? c.fullBoxes : null, grossKgEach: ps.grossKg }
+    // cargas antigas: "Misto N · SKU" de um produto só aparece (e agrupa) só pelo SKU
+    const name = palletDisplayName(p)
+    const key = `${name}|${c.boxes}|${Math.round(ps.grossKg)}`
+    const cur = groups.get(key) ?? { name, count: 0, boxes: c.boxes, fullBoxes: c.partial ? c.fullBoxes : null, grossKgEach: ps.grossKg }
     cur.count++
     groups.set(key, cur)
   }

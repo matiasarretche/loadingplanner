@@ -44,3 +44,25 @@ describe('campos técnicos exigidos por família', () => {
     expect(missingFields('Acessórios', {})).toEqual([])
   })
 })
+
+describe('famílias novas do catálogo oficial (códigos numéricos)', () => {
+  it('Filmes em rolo: ordem e campos de lona (largura → comprimento → espessura)', async () => {
+    const { missingFields, productKind, requiredFields } = await import('./productOrder')
+    expect(productKind('Filmes em rolo')).toBe('lona')
+    expect(requiredFields('Filmes em rolo')).toEqual(['widthM', 'length', 'thicknessUm'])
+    expect(missingFields('Filmes em rolo', { widthM: 1.5, lengthM: 600 })).toEqual(['thicknessUm'])
+    const film = (sku: string, w: number, m: number, um: number) => ({ sku, familyName: 'Filmes em rolo', familySort: 8, attrs: { largura_m: w, comprimento_m: m }, thicknessUm: um })
+    const list = [film('18135', 8, 150, 50), film('18054', 1.5, 600, 40), film('18133', 8, 150, 45), film('18131', 8, 120, 50)]
+    expect(sortProducts(list, (x) => x).map((x) => x.sku)).toEqual(['18054', '18131', '18133', '18135'])
+  })
+  it('códigos numéricos empatados: ordem natural do código, Pacifil primeiro', () => {
+    const list = [sb('19950', 9, 75, 200, 'Ecobag'), sb('17500', 9, 75, 200), sb('9999', 9, 75, 200)]
+    expect(sortProducts(list, (x) => x).map((x) => x.sku)).toEqual(['9999', '17500', '19950'])
+  })
+  it('Hidropeso e Acessórios', async () => {
+    const { productKind, requiredFields } = await import('./productOrder')
+    expect(productKind('Hidropeso')).toBe('hidro')
+    expect(requiredFields('Hidropeso')).toEqual(['widthM', 'length', 'thicknessUm'])
+    expect(requiredFields('Acessórios')).toEqual([])
+  })
+})

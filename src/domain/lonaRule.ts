@@ -19,9 +19,12 @@ const norm = (s: string) =>
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
 
-/** Largura da lona em metros a partir do nome ("Lona BPF 8 × 50 m × 125 µm" → 8). */
+/**
+ * Largura da lona em metros a partir do nome ("Lona BPF 8 × 50 m × 125 µm" → 8). É o primeiro número
+ * seguido de "× <número>": assim o "X3" de "Lona BPF Plus X3 10 × 50 m" não atrapalha (→ 10).
+ */
 export function lonaWidthM(name: string): number | null {
-  const m = /^lona\b[^\d]*?(\d+(?:[.,]\d+)?)\s*[×x]/i.exec(name.trim())
+  const m = /^lona\b.*?(\d+(?:[.,]\d+)?)\s*[×x]\s*\d/i.exec(name.trim())
   return m ? Number(m[1].replace(',', '.')) : null
 }
 
@@ -50,6 +53,16 @@ export function citesLonaLine(text: string): boolean {
 export function allowedByLonaRule(name: string, area: BusinessArea): boolean {
   if (!isRuleLona(name)) return true
   return ruleLine(name) === LINE_FOR[area]
+}
+
+/**
+ * Catálogo que a busca oferece para a área: sem linha citada no pedido, tira as lonas da outra linha — menos
+ * as que o pedido cita pelo CÓDIGO (escolha explícita; os códigos oficiais são numéricos e não dizem a linha).
+ */
+export function filterByLonaRule<T extends { sku: string; name: string }>(items: T[], area: BusinessArea, query: string): T[] {
+  if (citesLonaLine(query)) return items
+  const cited = new Set(query.toUpperCase().split(/[^0-9A-Z-]+/).filter(Boolean))
+  return items.filter((e) => cited.has(e.sku.toUpperCase()) || allowedByLonaRule(e.name, area))
 }
 
 /**

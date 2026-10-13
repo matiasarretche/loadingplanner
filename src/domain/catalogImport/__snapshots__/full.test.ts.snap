@@ -1,0 +1,355 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
+{
+  "boxesUsed": [
+    {
+      "boxCode": "69493",
+      "dims": "1000×600×220",
+      "products": 41,
+    },
+    {
+      "boxCode": "74043",
+      "dims": "1140×570×570",
+      "products": 27,
+    },
+    {
+      "boxCode": "69490",
+      "dims": "1000×600×450",
+      "products": 26,
+    },
+    {
+      "boxCode": "69488",
+      "dims": "1000×600×400",
+      "products": 24,
+    },
+    {
+      "boxCode": "69495",
+      "dims": "1150×570×570",
+      "products": 24,
+    },
+    {
+      "boxCode": "52185",
+      "dims": "550×500×400",
+      "products": 21,
+    },
+    {
+      "boxCode": "69491",
+      "dims": "1000×600×490",
+      "products": 18,
+    },
+    {
+      "boxCode": "75382",
+      "dims": "2100×364×337",
+      "products": 16,
+    },
+    {
+      "boxCode": "72444",
+      "dims": "1150×570×650",
+      "products": 15,
+    },
+    {
+      "boxCode": "69498",
+      "dims": "1150×570×750",
+      "products": 13,
+    },
+    {
+      "boxCode": "74645",
+      "dims": "1600×364×337",
+      "products": 13,
+    },
+    {
+      "boxCode": "75913",
+      "dims": "1000×600×100",
+      "products": 12,
+    },
+    {
+      "boxCode": "79582",
+      "dims": "1140×570×150",
+      "products": 12,
+    },
+    {
+      "boxCode": "69496",
+      "dims": "1000×600×130",
+      "products": 11,
+    },
+    {
+      "boxCode": "79581",
+      "dims": "1140×570×110",
+      "products": 11,
+    },
+    {
+      "boxCode": "69497",
+      "dims": "1150×570×1060",
+      "products": 10,
+    },
+    {
+      "boxCode": "79583",
+      "dims": "1140×570×250",
+      "products": 10,
+    },
+    {
+      "boxCode": "70328",
+      "dims": "1000×600×267",
+      "products": 9,
+    },
+    {
+      "boxCode": "72786",
+      "dims": "600×500×130",
+      "products": 9,
+    },
+    {
+      "boxCode": "74041",
+      "dims": "1000×600×350",
+      "products": 8,
+    },
+    {
+      "boxCode": "77289",
+      "dims": "2250×380×260",
+      "products": 7,
+    },
+    {
+      "boxCode": "72543",
+      "dims": "1100×650×270",
+      "products": 5,
+    },
+    {
+      "boxCode": "74042",
+      "dims": "1000×600×450",
+      "products": 5,
+    },
+    {
+      "boxCode": "74627",
+      "dims": "1000×600×450",
+      "products": 5,
+    },
+    {
+      "boxCode": "74628",
+      "dims": "1140×570×570",
+      "products": 5,
+    },
+    {
+      "boxCode": "75914",
+      "dims": "1000×600×170",
+      "products": 5,
+    },
+    {
+      "boxCode": "74044",
+      "dims": "1140×570×650",
+      "products": 4,
+    },
+    {
+      "boxCode": "75381",
+      "dims": "600×500×100",
+      "products": 4,
+    },
+    {
+      "boxCode": "77288",
+      "dims": "2250×380×180",
+      "products": 4,
+    },
+    {
+      "boxCode": "74681",
+      "dims": "1000×600×350",
+      "products": 2,
+    },
+    {
+      "boxCode": "77290",
+      "dims": "2250×380×310",
+      "products": 2,
+    },
+    {
+      "boxCode": "—",
+      "dims": "1140×570×180",
+      "products": 1,
+    },
+    {
+      "boxCode": "69499",
+      "dims": "1143×568×250",
+      "products": 1,
+    },
+  ],
+  "byFamily": [
+    {
+      "family": "SILO_BAG",
+      "name": "Silo-bolsa",
+      "pending": 25,
+      "total": 227,
+      "withPackaging": 202,
+    },
+    {
+      "family": "SILAGE_TARP",
+      "name": "Lona de silagem",
+      "pending": 99,
+      "total": 225,
+      "withPackaging": 126,
+    },
+    {
+      "family": "HIDROSILO",
+      "name": "Hidrosilo",
+      "pending": 5,
+      "total": 53,
+      "withPackaging": 48,
+    },
+    {
+      "family": "HYDROFORCE",
+      "name": "Hidroforce",
+      "pending": 0,
+      "total": 4,
+      "withPackaging": 4,
+    },
+    {
+      "family": "SILAGE_BAG",
+      "name": "Bolsa para silagem",
+      "pending": 4,
+      "total": 4,
+      "withPackaging": 0,
+    },
+    {
+      "family": "ACCESSORY",
+      "name": "Acessórios",
+      "pending": 17,
+      "total": 17,
+      "withPackaging": 0,
+    },
+    {
+      "family": "FILM_ROLL",
+      "name": "Filmes em rolo",
+      "pending": 24,
+      "total": 24,
+      "withPackaging": 0,
+    },
+    {
+      "family": "HIDROPESO",
+      "name": "Hidropeso",
+      "pending": 3,
+      "total": 3,
+      "withPackaging": 0,
+    },
+  ],
+  "byLine": [
+    {
+      "line": "Silo-bolsa",
+      "total": 195,
+    },
+    {
+      "line": "Lona BigSafe",
+      "total": 97,
+    },
+    {
+      "line": "Lona BPF",
+      "total": 55,
+    },
+    {
+      "line": "Hidrosilo",
+      "total": 53,
+    },
+    {
+      "line": "Lona padrão",
+      "total": 38,
+    },
+    {
+      "line": "Lona Big Silo",
+      "total": 18,
+    },
+    {
+      "line": "Silo-bolsa Probag",
+      "total": 17,
+    },
+    {
+      "line": "Silo-bolsa Ecobag",
+      "total": 15,
+    },
+    {
+      "line": "Filme BPF",
+      "total": 13,
+    },
+    {
+      "line": "Fita PE silo-bolsa",
+      "total": 12,
+    },
+    {
+      "line": "Filme BigSafe",
+      "total": 11,
+    },
+    {
+      "line": "Lona BPF Plus X3",
+      "total": 9,
+    },
+    {
+      "line": "Bolsa para silagem",
+      "total": 4,
+    },
+    {
+      "line": "Fita de butil",
+      "total": 4,
+    },
+    {
+      "line": "Hidroforce",
+      "total": 4,
+    },
+    {
+      "line": "Lona Plus (LP)",
+      "total": 4,
+    },
+    {
+      "line": "Hidropeso",
+      "total": 3,
+    },
+    {
+      "line": "Lona barreira O2 (PA)",
+      "total": 2,
+    },
+    {
+      "line": "Lona BPF B/P",
+      "total": 2,
+    },
+    {
+      "line": "Adesivo de reparo",
+      "total": 1,
+    },
+  ],
+  "confidence": {
+    "HIGH": 193,
+    "MEDIUM": 187,
+  },
+  "deactivations": 154,
+  "duplicateGroups": 89,
+  "duplicatesDiscarded": 110,
+  "ean": {
+    "EAN13": 531,
+    "GTIN14": 15,
+    "INVALID": 11,
+    "missing": 0,
+  },
+  "familiesWithoutActiveProducts": [
+    "Animal Comfort",
+  ],
+  "grossReplaced": 130,
+  "newFamilies": [
+    "Filmes em rolo",
+    "Hidropeso",
+  ],
+  "newLines": [
+    "Fita de butil",
+    "Fita PE silo-bolsa",
+    "Lona BPF Plus X3",
+    "Lona barreira O2 (PA)",
+    "Lona BPF B/P",
+    "Filme BigSafe",
+    "Filme BPF",
+    "Bolsa para silagem",
+    "Hidropeso",
+    "Adesivo de reparo",
+  ],
+  "parsedRows": 667,
+  "pending": 177,
+  "planned": 557,
+  "refPalletsEstimate": 380,
+  "sheetRows": 667,
+  "skippedRows": 0,
+  "toCreate": 557,
+  "toUpdate": 0,
+  "withPackaging": 380,
+}
+`;

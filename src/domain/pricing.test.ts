@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { placePallets } from './autoload'
 import { container, loadDoc, pack, palletDoc, palletType } from './fixtures'
 import { kitBoxPack, packKeyOf } from './kitBoxes'
-import { orderValueFromPrices, quoteSignatureInput, quoteSummary, skuQuantities } from './pricing'
+import { commissionAgentId, orderValueFromPrices, quoteSignatureInput, quoteSummary, skuQuantities } from './pricing'
 
 describe('valor do pedido com os preços do módulo', () => {
   const a = pack({ sku: 'SB-A', packagingVersionId: 1, grossKg: 100, netKg: 94 })
@@ -81,5 +81,28 @@ describe('kits em caixas coletivas: valor e assinatura contam kits (unidades), n
     expect(q(boxed)).toMatchObject({ units: 26, boxes: 1 })
     expect(q(loose)).toMatchObject({ units: 26, boxes: 26 })
     expect(q(boxed).pack.netKg / q(boxed).pack.unitsPerPackage).toBe(q(loose).pack.netKg / q(loose).pack.unitsPerPackage)
+  })
+})
+
+describe('agente da comissão ao re-congelar preços', () => {
+  it('agente ativo: vale o da carga (troca de agente)', () => {
+    expect(commissionAgentId({ id: 7, active: true }, null)).toBe(7)
+    expect(commissionAgentId({ id: 7, active: true }, 3)).toBe(7)
+    expect(commissionAgentId({ id: 7, active: true }, 7)).toBe(7)
+  })
+
+  it('agente inativo não aplica comissão nova (congelado sem agente ou com outro)', () => {
+    expect(commissionAgentId({ id: 7, active: false }, null)).toBeNull()
+    expect(commissionAgentId({ id: 7, active: false }, 3)).toBeNull()
+    expect(commissionAgentId({ id: 7, active: false }, undefined)).toBeNull()
+  })
+
+  it('agente desativado depois da aprovação: mantém a comissão já congelada com ele', () => {
+    expect(commissionAgentId({ id: 7, active: false }, 7)).toBe(7)
+  })
+
+  it('carga sem agente', () => {
+    expect(commissionAgentId(null, 7)).toBeNull()
+    expect(commissionAgentId(undefined, null)).toBeNull()
   })
 })

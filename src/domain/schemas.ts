@@ -29,6 +29,8 @@ export const packSnapshotSchema = z.object({
   price: z.object({ amount: z.number().min(0), currency: z.string().min(3).max(3), per: z.enum(['UNIT', 'BOX', 'PALLET']) }).nullable().optional(),
   companions: z.array(z.object({ sku: z.string().min(1).max(60), qty: z.number().positive() })).max(10).optional(),
   boxesPerPallet: z.number().int().positive().nullable().optional(),
+  // formato do volume (domain/packShape): 'ROLL' = lona/filme em rolo; sem isto o zod descartaria o campo ao salvar
+  shape: z.literal('ROLL').optional(),
   // caixa coletiva de kits (domain/kitBoxes): sem isto o zod descartaria o campo ao salvar
   kitBox: z
     .object({

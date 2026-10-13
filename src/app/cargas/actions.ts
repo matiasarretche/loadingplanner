@@ -28,6 +28,8 @@ import { autoPlanName, normalizeOrderRef, orderRefLabel } from '@/lib/orderRef'
 import { placeValue } from '@/lib/places'
 import { parseMoney, PaymentTerms, paymentTermsErrors } from '@/domain/paymentTerms'
 import { VEHICLE_LENGTH_LIMITS, withVehicleLength } from '@/domain/vehicleLength'
+import { planUndoApproval, UndoApprovalBlock } from '@/domain/approval'
+import { commissionAgentId } from '@/domain/pricing'
 
 export interface NewPlanState {
   error?: string
@@ -514,6 +516,74 @@ export async function approveAction(versionId: number) {
   })
   await logAudit('load_plan_version', versionId, 'approve', me.id, { version: v.version })
   revalidatePath('/')
+  redirect(`/cargas/${v.loadPlanId}?v=${v.version}`)
+}
+
+/** motivo do bloqueio → código ?erro= da página da carga (mensagens em cargas/[id]/page.tsx) */
+const UNDO_APPROVAL_ERRO: Record<UndoApprovalBlock, string> = {
+  not_found: 'desfazerstatus',
+  not_approved: 'desfazerstatus',
+  not_latest: 'desfazerversao',
+  export_operation: 'desfazerseguimento',
+}
+
+/**
+ * Desfaz a aprovação: a versão APROVADA volta para RASCUNHO (editável de novo, preços ao vivo) e, se esta
+ * aprovação tinha substituído outra, a última versão SUBSTITUÍDA volta a ser a aprovada (com os preços
+ * congelados dela). Só a última versão da carga e só sem seguimento de exportação (pedido confirmado).
+ * As cotações já emitidas continuam no histórico. Decisão (pura) em src/domain/approval.ts.
+ */
+export async function undoApprovalAction(versionId: number) {
+  // qualquer usuário que edita cargas pode desfazer (aprovar continua só para gerente/admin)
+  const me = await assertUser('editPlans')
+  const v = await getVersion(versionId, me)
+  if (!v) return
+  // alertas recalculados como num salvamento de rascunho (a aprovação gravou os do momento)
+  const ev = evaluate(v.document)
+  const r = await db.transaction(async (tx) => {
+    // trava a carga (FOR UPDATE): serializa com "Confirmar pedido" (confirmOrder trava a mesma linha e
+    // confere de novo a versão aprovada) e com a criação de versão/operação (a FK espera esta trava)
+    await tx.select({ id: schema.loadPlans.id }).from(schema.loadPlans).where(eq(schema.loadPlans.id, v.loadPlanId)).for('update')
+    // trava as versões da carga: ninguém aprova no meio
+    const versions = await tx
+      .select({ id: schema.loadPlanVersions.id, version: schema.loadPlanVersions.version, status: schema.loadPlanVersions.status, approvedAt: schema.loadPlanVersions.approvedAt })
+      .from(schema.loadPlanVersions)
+      .where(eq(schema.loadPlanVersions.loadPlanId, v.loadPlanId))
+      .for('update')
+    // lido depois das travas: uma confirmação concorrente já terminou (e aparece aqui) ou espera esta transação
+    const [op] = await tx.select({ id: schema.exportOperations.id }).from(schema.exportOperations).where(eq(schema.exportOperations.loadPlanId, v.loadPlanId)).limit(1)
+    const plan = planUndoApproval(versions, v.id, { exportOperation: Boolean(op) })
+    if (!plan.ok) return plan
+    await tx
+      .update(schema.loadPlanVersions)
+      .set({ status: 'DRAFT', approvedBy: null, approvedAt: null, pricing: null, issues: ev.issues, criticalCount: ev.critical, warningCount: ev.warning, updatedBy: me.id, updatedAt: new Date() })
+      .where(and(eq(schema.loadPlanVersions.id, v.id), eq(schema.loadPlanVersions.status, 'APPROVED')))
+    if (plan.restore)
+      await tx
+        .update(schema.loadPlanVersions)
+        .set({ status: 'APPROVED' })
+        .where(and(eq(schema.loadPlanVersions.id, plan.restore.id), eq(schema.loadPlanVersions.status, 'SUPERSEDED')))
+    return plan
+  })
+  if (!r.ok) redirect(`/cargas/${v.loadPlanId}?v=${v.version}&erro=${UNDO_APPROVAL_ERRO[r.reason]}`)
+  // agente trocado enquanto a versão restaurada estava substituída: a aprovada volta com a comissão do
+  // agente atual (mesma base congelada), como em qualquer troca de agente depois da aprovação. Compara
+  // com o agente que a comissão aplicaria (inativo = sem agente, salvo se já era o congelado): agente
+  // inativo na carga e congelado sem agente NÃO é troca. Preços congelados antes do módulo de agentes
+  // (sem o campo agent) ficam como estão.
+  let recommissioned = 0
+  if (r.restore) {
+    const [rv, plan] = await Promise.all([
+      db.query.loadPlanVersions.findFirst({ columns: { pricing: true }, where: eq(schema.loadPlanVersions.id, r.restore.id) }),
+      db.query.loadPlans.findFirst({ columns: { agentId: true }, where: eq(schema.loadPlans.id, v.loadPlanId) }),
+    ])
+    const agentRow = plan?.agentId ? await db.query.agents.findFirst({ columns: { id: true, active: true }, where: eq(schema.agents.id, plan.agentId) }) : null
+    const frozenAgentId = rv?.pricing?.agent?.id ?? null
+    if (rv?.pricing && 'agent' in rv.pricing && frozenAgentId !== commissionAgentId(agentRow, frozenAgentId)) recommissioned = await refreezeCommission([v.loadPlanId])
+  }
+  await logAudit('load_plan_version', versionId, 'unapprove', me.id, { version: v.version, restored: r.restore?.id ?? null, restoredVersion: r.restore?.version ?? null, ...(recommissioned ? { recommissioned } : {}) })
+  revalidatePath('/')
+  revalidatePath(`/cargas/${v.loadPlanId}`)
   redirect(`/cargas/${v.loadPlanId}?v=${v.version}`)
 }
 

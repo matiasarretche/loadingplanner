@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db, schema } from '@/db'
 import { commissionOutsideUsual, COMMISSION_USUAL, PricingConfig, quotePrice, roundUpUsd, twinsWithSnapshot } from '@/domain/exportPricing'
-import { FrozenPricing, orderValue, orderValueFromPrices, PriceResolution, proformaTotals, quoteSignatureInput, QuoteSnapshotLine, skuQuantities } from '@/domain/pricing'
+import { commissionAgentId, FrozenPricing, orderValue, orderValueFromPrices, PriceResolution, proformaTotals, quoteSignatureInput, QuoteSnapshotLine, skuQuantities } from '@/domain/pricing'
 import { PaymentTerms, paymentTermsText, TermsLang } from '@/domain/paymentTerms'
 import type { LoadDoc } from '@/domain/types'
 import { countryCode } from './countries'
@@ -329,6 +329,7 @@ export async function issuedQuotesView(o: { loadPlanId?: number; limit?: number 
 /**
  * Agente ou % de comissão trocados DEPOIS da aprovação: re-congela os preços da versão aprovada com a
  * comissão nova, sobre a MESMA base congelada (lista + marca + CIF). Sem agente: preço sem comissão.
+ * Agente inativo conta como sem agente, salvo se já era o agente congelado (ver commissionAgentId).
  * Devolve quantas versões foram re-congeladas.
  */
 export async function refreezeCommission(planIds: number[]): Promise<number> {
@@ -342,7 +343,9 @@ export async function refreezeCommission(planIds: number[]): Promise<number> {
   for (const { v, agentId } of versions) {
     const fp = v.pricing
     if (!fp) continue
-    const agent = agentId ? await db.query.agents.findFirst({ where: eq(schema.agents.id, agentId) }) : null
+    const agentRow = agentId ? await db.query.agents.findFirst({ where: eq(schema.agents.id, agentId) }) : null
+    // agente inativo não aplica comissão nova (como no cálculo ao vivo); a já congelada com ele fica
+    const agent = agentRow && commissionAgentId(agentRow, fp.agent?.id) != null ? agentRow : null
     const rates = agent ? await db.select().from(schema.commissionRates).where(eq(schema.commissionRates.agentId, agent.id)) : []
     const pctOf = new Map(rates.map((r) => [r.familyId, r.pct]))
     const lines: Record<string, PriceResolution> = {}

@@ -4,6 +4,7 @@ import { after } from 'next/server'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { db, schema as s } from '@/db'
+import { eanStatusOf } from '@/domain/catalogImport/ean'
 import { isOrientation } from '@/domain/geometry'
 import { todayBR } from '@/domain/exportTracking'
 import { parseTechOption } from '@/domain/technology'
@@ -45,6 +46,10 @@ export interface CatalogItemInput {
   widthM: string
   lengthM: string
   lengthFt: string
+  /** código de barras (só dígitos, 8 a 14; vazio = sem EAN) — guardado como texto, com o estado de validade */
+  ean: string
+  /** código da caixa na tabela de caixas (attrs.codigo_caixa; vazio = remove) */
+  boxCode: string
   notes: string
   /** preço de referência (vazio = sem preço) */
   price: string
@@ -92,6 +97,20 @@ export async function saveCatalogItemAction(input: CatalogItemInput): Promise<Ac
   const lengthM = measure('lengthM', 5000)
   const lengthFt = measure('lengthFt', 20000)
   const priceUnit = (['UNIT', 'BOX', 'PALLET'].includes(input.priceUnit) ? input.priceUnit : 'UNIT') as 'UNIT' | 'BOX' | 'PALLET'
+  // EAN: texto exatamente como digitado (nunca número); o estado (EAN-13 / GTIN-14 / inválido) não bloqueia
+  const ean = (input.ean ?? '').trim() || null
+  if (ean !== null && !/^\d{8,14}$/.test(ean)) fe.ean = 'Só dígitos (8 a 14)'
+  const eanStatus = eanStatusOf(ean).status
+  // código da caixa (tabela de caixas): fica em attrs.codigo_caixa, como texto
+  const boxCode = (input.boxCode ?? '').trim()
+  if (boxCode && !/^[0-9A-Za-z][0-9A-Za-z./-]{0,29}$/.test(boxCode)) fe.boxCode = 'Código da caixa (ex.: 69490)'
+  const withBoxCode = (attrs: Record<string, string | number | null> | null | undefined) => {
+    // mantém a ordem das chaves (a auditoria compara por JSON)
+    const out: Record<string, string | number | null> = { ...(attrs ?? {}) }
+    if (boxCode) out.codigo_caixa = boxCode
+    else delete out.codigo_caixa
+    return out
+  }
 
   // Embalagem: opcional, mas se informar algo, medidas e pesos são obrigatórios
   const packFields = [input.lengthMm, input.widthMm, input.heightMm, input.netKg, input.grossKg, input.unitsPerPallet]
@@ -154,20 +173,23 @@ export async function saveCatalogItemAction(input: CatalogItemInput): Promise<Ac
   
       let variantId = input.variantId
       const brand = (input.brand ?? '').trim() || 'Pacifil'
-      const vData = { productId: product.id, sku, name, brand, thicknessUm, diameterFt, widthM, lengthM, lengthFt, notes: input.notes.trim() || null, active: true, price, priceCurrency, priceUnit }
+      const vData = { productId: product.id, sku, name, brand, thicknessUm, diameterFt, widthM, lengthM, lengthFt, ean, eanStatus, notes: input.notes.trim() || null, active: true, price, priceCurrency, priceUnit }
       if (variantId == null) {
-        const [v] = await tx.insert(s.productVariants).values({ ...vData, ...(price !== null ? { priceUpdatedAt: new Date() } : {}), createdBy: me.id, updatedBy: me.id }).returning()
+        const attrs = withBoxCode({})
+        const [v] = await tx.insert(s.productVariants).values({ ...vData, attrs, ...(price !== null ? { priceUpdatedAt: new Date() } : {}), createdBy: me.id, updatedBy: me.id }).returning()
         variantId = v.id
-        await logAudit('product_variant', v.id, 'create', me.id, vData)
+        await logAudit('product_variant', v.id, 'create', me.id, { ...vData, attrs })
       } else {
         const before = await tx.query.productVariants.findFirst({ where: eq(s.productVariants.id, variantId) })
         if (!before) return { error: 'Produto não encontrado.' } as ActionResult
         const priceChanged = before.price !== price || before.priceCurrency !== priceCurrency || before.priceUnit !== priceUnit
+        // atributos: só o código da caixa muda aqui; os demais (técnicos, da importação) ficam como estão
+        const attrs = withBoxCode(before.attrs)
         await tx
           .update(s.productVariants)
-          .set({ ...vData, ...(priceChanged ? { priceUpdatedAt: new Date() } : {}), updatedBy: me.id, updatedAt: new Date() })
+          .set({ ...vData, attrs, ...(priceChanged ? { priceUpdatedAt: new Date() } : {}), updatedBy: me.id, updatedAt: new Date() })
           .where(eq(s.productVariants.id, variantId))
-        await logAudit('product_variant', variantId, 'update', me.id, diffRecords(before, vData))
+        await logAudit('product_variant', variantId, 'update', me.id, diffRecords(before, { ...vData, attrs }))
       }
   
       if (pack) {

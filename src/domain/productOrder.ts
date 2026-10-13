@@ -3,7 +3,7 @@
  * paletes mistos, montagens, PDFs…). Mantém a ordem das famílias; dentro de cada família ordena pelas
  * MEDIDAS NUMÉRICAS (nunca alfabética: 5, 6, 8, 9, 10, 12, 14 pés — não 10, 12, 5…):
  *  - Silo-bolsa:        diâmetro (pés) → comprimento → espessura
- *  - Lona de silagem:   largura → comprimento → espessura
+ *  - Lona de silagem:   largura → comprimento → espessura (também Filmes em rolo)
  *  - Hidrosilo / Hydroforce: largura (2 m, 3 m) → capacidade (litros)
  *  - Animal Comfort:    largura → comprimento
  * Valores ausentes vão para o fim; empates: marca (Pacifil primeiro) e código em ordem natural.
@@ -34,6 +34,8 @@ export function productKind(familyName?: string | null): ProductKind {
   const f = norm(familyName)
   if (/silo.?bols|silobag|silo bag/.test(f)) return 'silo'
   if (/lona|silag/.test(f)) return 'lona'
+  // filmes em rolo (BPF / BigSafe finos): medidas de lona — largura × comprimento × espessura
+  if (/film/.test(f)) return 'lona'
   if (/hidro|hydro/.test(f)) return 'hidro'
   if (/animal|comfort|conforto/.test(f)) return 'animal'
   return 'other'

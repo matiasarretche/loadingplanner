@@ -16,6 +16,31 @@ export interface MixedLoadResult {
   balanced: boolean
 }
 
+/**
+ * Nome do palete montado pelo planejador: "Misto N · A+B" SÓ quando leva mais de um produto; palete de um
+ * produto só (os acompanhantes obrigatórios, ex.: KIT-HF, não contam como outro produto) leva o código do
+ * produto — sem número, para que paletes iguais se agrupem no PDF ("HS-2M-50K" × 3).
+ */
+export function plannerPalletName(p: PalletDoc, index: number): string {
+  const companionSkus = new Set(Object.values(p.packs).flatMap((k) => (k.companions ?? []).map((c) => c.sku.toUpperCase())))
+  const skus = [...new Set(Object.values(p.packs).map((k) => k.sku))]
+  const main = skus.filter((s) => !companionSkus.has(s.toUpperCase()))
+  if (main.length <= 1) {
+    const kits = skus.filter((s) => companionSkus.has(s.toUpperCase()))
+    return `${main[0] ?? skus[0] ?? `Palete ${index}`}${main.length && kits.length ? ` + ${kits.join('+')}` : ''}`
+  }
+  return `Misto ${index} · ${skus.join('+')}`
+}
+
+/**
+ * Nome para exibir: cargas antigas chamavam de "Misto N · …" todo palete do planejador, até os de um produto
+ * só (com ou sem KIT-HF) → recalcula pelo conteúdo do palete; os mistos de verdade continuam "Misto N · A+B".
+ */
+export function palletDisplayName(p: PalletDoc): string {
+  const m = /^Misto (\d+) · /.exec(p.name)
+  return m ? plannerPalletName(p, Number(m[1])) : p.name
+}
+
 export function placeMixedPalletsInLoad(doc0: LoadDoc, pallets: PalletDoc[], stamp: string): MixedLoadResult {
   const ordered = pallets
     .map((p, i) => ({ p, i, kg: palletSummary(p).grossKg, area: p.palletType.dims.l * p.palletType.dims.w }))
@@ -24,8 +49,7 @@ export function placeMixedPalletsInLoad(doc0: LoadDoc, pallets: PalletDoc[], sta
   let placed = 0
   const failed: number[] = []
   for (const { p, i } of ordered) {
-    const skus = [...new Set(Object.values(p.packs).map((k) => k.sku))].join('+')
-    const r = placePallets(d, `${stamp}_${i + 1}`, { ...p, name: `Misto ${i + 1} · ${skus}` }, 1)
+    const r = placePallets(d, `${stamp}_${i + 1}`, { ...p, name: plannerPalletName(p, i + 1) }, 1)
     if (r.placed) {
       d = r.doc
       placed++

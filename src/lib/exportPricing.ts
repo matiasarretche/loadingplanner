@@ -1,12 +1,12 @@
 import 'server-only'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { db, schema } from '@/db'
 import { bandPriceKey, brandKey, buildPriceTwins, commissionKey, diameterFtOf, PriceBand, PricedProduct, PricingPayload, quotePrice, priceKey, PriceMethod, PricingConfig, WATER_TANK_FAMILY } from '@/domain/exportPricing'
 import { countryCode } from './countries'
 
 /** Configuração comercial vigente (categorias, países, regras e preços por família, recargo CIF de cada família). */
 export async function loadPricingConfig(): Promise<PricingConfig> {
-  const [categories, countries, rules, prices, brands, commissions, priceTwin, bands] = await Promise.all([
+  const [categories, countries, rules, prices, brands, commissions, priceTwin, bands, companionSkus] = await Promise.all([
     db.select().from(schema.priceCategories),
     db.select().from(schema.countryPriceCategories),
     db.select().from(schema.familyPriceRules),
@@ -15,6 +15,7 @@ export async function loadPricingConfig(): Promise<PricingConfig> {
     db.select().from(schema.commissionRates),
     loadPriceTwins(),
     loadPriceBands(),
+    loadCompanionSkus(),
   ])
   return {
     categories: categories.sort((a, b) => a.sort - b.sort || a.code.localeCompare(b.code)).map((c) => ({ id: c.id, code: c.code, name: c.name, active: c.active })),
@@ -25,7 +26,17 @@ export async function loadPricingConfig(): Promise<PricingConfig> {
     familyPrice: new Map(prices.map((p) => [priceKey(p.familyId, p.categoryId), { usdPerKg: p.usdPerKg, fixedUsdPerUnit: p.fixedUsdPerUnit }])),
     priceTwin,
     ...bands,
+    companionSkus,
   }
+}
+
+/**
+ * SKUs que algum produto exige como acompanhante (atributo acessorio_sku, ativos ou não: uma carga salva pode
+ * ter o produto principal desativado depois). Só esses valem 0 numa família "incluído" (ver quotePrice).
+ */
+export async function loadCompanionSkus(): Promise<Set<string>> {
+  const r = await db.execute<{ sku: string }>(sql`SELECT DISTINCT upper(trim(attrs->>'acessorio_sku')) AS sku FROM product_variant WHERE coalesce(trim(attrs->>'acessorio_sku'), '') <> ''`)
+  return new Set(r.rows.map((x) => x.sku))
 }
 
 /**
@@ -131,6 +142,7 @@ export async function pricingPayload(): Promise<PricingPayload> {
     familyBands: [...(cfg.familyBands ?? [])],
     bandPrice: [...(cfg.bandPrice ?? [])],
     skuDiameterFt: [...(cfg.skuDiameterFt ?? [])],
+    companionSkus: cfg.companionSkus ? [...cfg.companionSkus] : undefined,
     products: products.map((p) => ({ sku: p.sku, familyId: p.familyId, brand: p.brand ?? null })),
     agents: agents.map((a) => ({ id: a.id, name: a.name })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
   }

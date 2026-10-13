@@ -1,0 +1,56 @@
+/* Manutenção (administrador principal): cartões lado a lado no computador, um embaixo do outro no celular */
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.card { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card h2 { margin: 0; }
+.card p { margin: 0; }
+.danger { border-color: #f1b8b3; }
+.danger h2 { color: var(--crit); }
+.fields { display: grid; gap: 10px; }
+.fields input[type='file'] { max-width: 100%; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.busy { color: var(--muted); font-size: 13px; }
+.tableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--border); border-radius: 6px; }
+.tableWrap table { min-width: 520px; }
+.tableWrap table.wide { min-width: 1100px; }
+.counts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.keep { font-size: 13px; color: var(--muted); }
+.step { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.step h3 { margin: 0; }
+.done { font-size: 13px; color: var(--ok); }
+.confirmInput { max-width: 220px; text-transform: none; }
+.deleteBtn { background: var(--crit); border-color: var(--crit); color: #fff; }
+.deleteBtn:hover:not(:disabled) { background: #8f1c13; }
+
+/* prévia da importação */
+.head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 12px; }
+.head h1 { margin: 0; }
+.meta { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.warnings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.warnings li { padding: 8px 10px; border-radius: 6px; font-size: 13px; line-height: 1.4; }
+.warnings li.BLOCKER { background: var(--crit-bg); color: var(--crit); }
+.warnings li.WARN { background: var(--warn-bg); color: var(--warn); }
+.warnings li.INFO { background: #eef1f4; color: #3d4954; }
+.warnings small { display: block; margin-top: 2px; word-break: break-word; color: inherit; opacity: .85; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin: 16px 0 12px; }
+.tabs a { padding: 7px 12px; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.tabs a:hover { text-decoration: none; background: #f2f4f6; }
+.tabs a.on { background: var(--panel); border-color: var(--border); color: var(--text); font-weight: 600; margin-bottom: -1px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-bottom: 10px; }
+.filters input[type='search'] { min-width: 220px; }
+.pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; }
+.small { font-size: 12px; color: var(--muted); }
+.cellNotes { font-size: 12px; color: var(--muted); max-width: 360px; }
+.mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.twoCols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.result { font-size: 13px; }
+.result ul { margin: 6px 0 0; padding-left: 18px; }
+.log { max-height: 260px; overflow: auto; font: 12px/1.45 ui-monospace, Consolas, monospace; background: #fafbfc; border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; word-break: break-word; }
+
+@media (max-width: 900px) {
+  .grid, .twoCols { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .actions > button, .actions > a { width: 100%; justify-content: center; }
+  .filters input[type='search'] { min-width: 0; width: 100%; }
+  .confirmInput { max-width: none; width: 100%; }
+}

@@ -1,6 +1,7 @@
 'use client'
 
 import { brandLabelFor } from '@/domain/brandLabels'
+import { isRollPack } from '@/domain/packShape'
 import { describeKitBoxes, kitBoxLines, kitFamilyOf, packKeyOf } from '@/domain/kitBoxes'
 import dynamic from 'next/dynamic'
 import { useMemo, useRef, useState } from 'react'
@@ -106,6 +107,7 @@ export function PalletEditor({ initial, catalog, readOnly, save, heading, saveLa
       color: pack?.color ?? '#999',
       print: pack?.sku,
       brand: pack ? brandLabelFor(pack) ?? undefined : undefined,
+      roll: isRollPack(pack),
       // caixa coletiva de kits: quantos kits leva (ex.: KIT-HF ×26)
       label: pack?.kitBox ? `${pack.sku} ×${pack.kitBox.kits}` : `${pack?.sku ?? '?'} #${i + 1}`,
       selected: selection.includes(it.id),

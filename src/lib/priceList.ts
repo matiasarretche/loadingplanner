@@ -17,6 +17,12 @@ export interface PriceListRow {
   lengthM: number | null
   thicknessUm: number | null
   capacityL: number | null
+  /** Hidrosilo / Hidroforce: válvulas ("4V"), unidades do pacote ("c/15 un"), largura do filme aberto quando o
+   * cadastro descreve o produto por ela ("(filme 4,3 m)") e a versão Plus X3 — distinguem tanques de mesma medida */
+  valves?: number | null
+  unitsPerPack?: number | null
+  filmWidthM?: number | null
+  plusX3?: boolean
   box: { l: number; w: number; h: number } | null
   unitsPerPallet: number | null
   palletCode: string | null
@@ -32,6 +38,8 @@ export interface PriceListGroup {
   family: string
   /** subtítulo do grupo (ex.: largura "2 m") */
   label: string
+  /** largura do grupo (Hidrosilo / Hidroforce), para o PDF formatar no idioma da lista */
+  widthM?: number | null
   rows: PriceListRow[]
 }
 
@@ -124,6 +132,10 @@ export async function priceListData(o: { families: string[]; skus?: string[] | n
       lengthM: v.lengthM,
       thicknessUm: v.thicknessUm,
       capacityL: num(attrsOf(r).capacidade_l),
+      valves: num(attrsOf(r).valvulas),
+      unitsPerPack: num(attrsOf(r).unidades_por_caixa),
+      filmWidthM: /\(filme /i.test(v.name) ? num(attrsOf(r).largura_filme_m) : null,
+      plusX3: /plus\s*x3/i.test(v.name),
       box: r.pv ? { l: r.pv.lengthMm, w: r.pv.widthMm, h: r.pv.heightMm } : null,
       unitsPerPallet: r.pv?.unitsPerPallet ?? null,
       palletCode: r.pallet ?? null,
@@ -135,7 +147,7 @@ export async function priceListData(o: { families: string[]; skus?: string[] | n
     // separado por largura só Hidrosilo / Hydroforce (lonas e demais: um grupo por família, ordenado por largura)
     const label = o.groupByWidth && v.widthM && isWaterTank(r.family) ? mLabel(v.widthM) : ''
     const key = `${r.family}|${label}`
-    if (!groups.has(key)) groups.set(key, { family: r.family, label, rows: [] })
+    if (!groups.has(key)) groups.set(key, { family: r.family, label, widthM: label ? v.widthM : null, rows: [] })
     groups.get(key)!.rows.push(row)
   }
   // ordem: família, largura (as linhas já vêm na ordem do catálogo: largura, capacidade, comprimento)

@@ -274,6 +274,13 @@
       "when": 1791913441657,
       "tag": "0038_cif_per_family",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791920374213,
+      "tag": "0039_catalog_import",
+      "breakpoints": true
     }
   ]
 }

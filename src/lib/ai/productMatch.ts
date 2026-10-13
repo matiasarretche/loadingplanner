@@ -44,9 +44,17 @@ export function extractNumbers(text: string): number[] {
 
 const STOP = new Set(['de', 'do', 'da', 'el', 'la', 'los', 'las', 'o', 'a', 'os', 'as', 'con', 'com', 'litros', 'litro', 'l', 'lts', 'lt', 'pallet', 'pallets', 'palete', 'paletes', 'producto', 'produto'])
 
-/** Ranqueia candidatos. Pontuação alta = forte; o chamador decide ambiguidade pela distância entre os primeiros. */
 /** grafias equivalentes ("Hydroforce" = "Hidroforce", "hydrosilo" = "hidrosilo") */
 const synonyms = (s: string) => s.replace(/hydro/g, 'hidro')
+
+/**
+ * Número solto que pode ser um código (texto já normalizado): não colado a outros dígitos nem parte de
+ * "20.000"/"5,5", e não seguido de unidade de capacidade, medida ou peso.
+ */
+const UNIT_AFTER = '(?:l|lts?|litros?|mil|k|m|mts?|metros?|m3|kg|kgs|mic|micras?|um|pes|pies|ft)(?![a-z0-9])|m²|m³|µm|μm'
+const CODE_TOKEN = new RegExp(`(?<![\\d.,])(\\d+)(?![\\d]|[.,]\\d)(?!\\s*(?:${UNIT_AFTER}))`, 'g')
+
+/** Ranqueia candidatos. Pontuação alta = forte; o chamador decide ambiguidade pela distância entre os primeiros. */
 
 export function rankProducts<T extends MatchCandidate>(query: string, items: T[], limit = 8): MatchResult<T>[] {
   const q = synonyms(normalize(query))
@@ -57,6 +65,18 @@ export function rankProducts<T extends MatchCandidate>(query: string, items: T[]
     .filter((w) => w && !STOP.has(w) && !/^\d+$/.test(w))
   const qCompact = q.replace(/[^a-z0-9]/g, '')
 
+  // números "soltos" do texto que podem ser um código oficial (numérico): nunca parte de "20.000" / "5,5" e nunca
+  // seguidos de unidade ("20000 L", "10000 litros", "50 m", "120 kg") — aí é capacidade/medida, não código
+  const codeTokens = new Set([...q.matchAll(CODE_TOKEN)].map((m) => m[1]))
+  // um número solto IGUAL a um atributo do catálogo (capacidade, medida…) num texto com outras palavras pode
+  // ser a capacidade, não o código ("hidrosilo 20000": o código 20000 é um Hidrosilo de 2,15 m, e 20.000 L é a
+  // capacidade de vários): aí o código só desempata. Vale inteiro com o número sozinho ou com o código marcado
+  // ("cód. 20000", "código 20000", "#20000", "ref 20000").
+  const attrNumbers = new Set<number>()
+  for (const it of items) for (const v of Object.values(it.attrs)) if (typeof v === 'number') attrNumbers.add(v)
+  const codeMarked = /\b(?:cod|codigo|ref|referencia|sku)\b|#/.test(q)
+  const weakCode = (code: string) => !codeMarked && words.length > 0 && attrNumbers.has(Number(code))
+
   const res: MatchResult<T>[] = []
   for (const it of items) {
     const reasons: string[] = []
@@ -64,8 +84,21 @@ export function rankProducts<T extends MatchCandidate>(query: string, items: T[]
     const sku = normalize(it.sku)
     const skuCompact = sku.replace(/[^a-z0-9]/g, '')
     const hay = synonyms(normalize(`${it.sku} ${it.name} ${it.family} ${it.line}`))
+    // código oficial numérico (ex.: 19712): só vale o código inteiro citado como número solto; sem "código
+    // parcial" e sem números dentro do código (senão "hidrosilo 20.000 L" acharia o código 20000)
+    const numericSku = /^\d+$/.test(sku)
+    const exactNumericCode = numericSku && codeTokens.has(sku)
+    const weak = exactNumericCode && weakCode(sku)
 
-    if (qCompact && skuCompact === qCompact) {
+    if (numericSku) {
+      if (exactNumericCode && weak) {
+        score += 10
+        reasons.push('código? (o número também é capacidade/medida)')
+      } else if (exactNumericCode) {
+        score += 100
+        reasons.push('código exato')
+      }
+    } else if (qCompact && skuCompact === qCompact) {
       score += 100
       reasons.push('código exato')
     } else if (qCompact.length >= 3 && (skuCompact.includes(qCompact) || qCompact.includes(skuCompact))) {
@@ -86,8 +119,10 @@ export function rankProducts<T extends MatchCandidate>(query: string, items: T[]
     }
     // números: capacidade em litros, medidas, e números no código (HS-10K = 10000)
     const numeric = Object.entries(it.attrs).filter(([, v]) => typeof v === 'number') as [string, number][]
-    const skuNums = extractNumbers(it.sku.replace(/(\d)K\b/i, '$1 k').replace(/(\d)L\b/i, '$1'))
+    const skuNums = numericSku ? [] : extractNumbers(it.sku.replace(/(\d)K\b/i, '$1 k').replace(/(\d)L\b/i, '$1'))
     for (const n of nums) {
+      // o próprio código citado não é medida: não conta como "número que não bate"
+      if (exactNumericCode && !weak && n === Number(sku)) continue
       const hit = numeric.find(([, v]) => v === n)
       if (hit) {
         score += 35

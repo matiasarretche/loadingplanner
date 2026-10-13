@@ -11,6 +11,13 @@ import { CatalogClient, CatalogFamily, CatalogRow } from './CatalogClient'
 // rodam na função desta página, então o prazo dela vale para esse recálculo (Vercel Hobby: máx. 300 s)
 export const maxDuration = 300
 
+/** código da caixa (tabela de caixas) guardado em attrs.codigo_caixa; vazio → null */
+function boxCodeOf(attrs: Record<string, unknown> | null | undefined): string | null {
+  const c = attrs?.codigo_caixa
+  if (typeof c === 'number' && Number.isFinite(c)) return String(c)
+  return typeof c === 'string' && c.trim() ? c.trim() : null
+}
+
 export default async function CatalogoPage() {
   const u = await requireUser()
   // Expedição (sem can.viewPrices) não recebe preços: nem na tela nem no payload enviado ao navegador
@@ -42,6 +49,10 @@ export default async function CatalogoPage() {
         sku: v.sku,
         name: v.name,
         brand: v.brand,
+        // código de barras (texto, como veio da planilha oficial) e código da caixa (attrs.codigo_caixa)
+        ean: v.ean ?? null,
+        eanStatus: v.eanStatus ?? null,
+        boxCode: boxCodeOf(v.attrs),
         spec: productSpec(technicalAttrs(v.attrs, v), v.thicknessUm),
         tech: technicalDetails(technicalAttrs(v.attrs, v), v.thicknessUm),
         thicknessUm: v.thicknessUm,

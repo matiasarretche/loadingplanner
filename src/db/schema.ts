@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   customType,
   date,
   index,
@@ -13,11 +14,13 @@ import {
   timestamp,
   unique,
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 import type { LoadDoc, PalletDoc } from '@/domain/types'
 import type { Issue } from '@/domain/issues'
 import type { FrozenPricing, QuoteSnapshotLine } from '@/domain/pricing'
 import type { PaymentTerms } from '@/domain/paymentTerms'
 import type { FieldSources } from '@/domain/exportTracking'
+import type { ApplyResult, CatalogImportStatus, EanStatus, ImportPlan, Summary as CatalogImportSummary, SyncReport } from '@/domain/catalogImport/types'
 
 // Convenções: medidas em mm (integer), pesos em kg (numeric 12,3), timestamps com fuso.
 const kg = (name: string) => numeric(name, { precision: 12, scale: 3, mode: 'number' })
@@ -127,6 +130,10 @@ export const productVariants = pgTable('product_variant', {
   lengthM: numeric('length_m', { precision: 8, scale: 3, mode: 'number' }),
   /** comprimento comercial em pés (silo-bolsas vendidas em pés, ex.: 300 pés) */
   lengthFt: numeric('length_ft', { precision: 8, scale: 2, mode: 'number' }),
+  /** código de barras como veio da planilha oficial (texto; nunca número) */
+  ean: text('ean'),
+  /** 'EAN13' (EAN-13 válido) | 'GTIN14' (GTIN-14/DUN-14 da caixa) | 'INVALID'; null = sem EAN */
+  eanStatus: text('ean_status').$type<EanStatus>(),
   /**
    * Preço de referência (lógica definitiva de precificação a definir: listas por cliente/Incoterm etc.).
    * Copiado no snapshot da carga para que cargas antigas mantenham o preço da época.
@@ -138,7 +145,10 @@ export const productVariants = pgTable('product_variant', {
   notes: text('notes'),
   active: boolean('active').notNull().default(true),
   ...audit(),
-})
+}, (t) => [
+  check('product_variant_ean_status_chk', sql`${t.eanStatus} IS NULL OR ${t.eanStatus} IN ('EAN13','GTIN14','INVALID')`),
+  index('product_variant_ean_idx').on(t.ean),
+])
 
 /** Versão de embalagem: imutável depois de usada em uma carga salva (`locked`). */
 export const packagingVersions = pgTable(
@@ -881,4 +891,44 @@ export const exportEvents = pgTable(
     message: text('message').notNull(),
   },
   (t) => [index('export_event_operation_idx').on(t.operationId, t.at)],
+)
+
+// ---------------------------------------------------------------------------
+// Importação do catálogo oficial (planilha de produtos + tabela de caixas) — Manutenção
+// ---------------------------------------------------------------------------
+
+/**
+ * Cada envio das planilhas gera uma PRÉVIA (plano completo em jsonb; nada muda no catálogo). Aplicar grava o
+ * catálogo numa transação (status APPLIED) e depois atualiza as montagens de palete (SYNCING → SYNCED/SYNC_FAILED).
+ * Uma prévia nova substitui as anteriores ainda não aplicadas (SUPERSEDED). Fica como histórico.
+ */
+export const catalogImports = pgTable(
+  'catalog_import',
+  {
+    id: serial('id').primaryKey(),
+    status: text('status').$type<CatalogImportStatus>().notNull().default('PREVIEW'),
+    /** versão do motor de importação que gerou o plano (aplicar exige a mesma) */
+    engineVersion: text('engine_version').notNull(),
+    productsFile: text('products_file').notNull(),
+    productsSha256: text('products_sha256').notNull(),
+    boxesFile: text('boxes_file').notNull(),
+    boxesSha256: text('boxes_sha256').notNull(),
+    /** "impressão digital" do catálogo na prévia: se mudar, a prévia precisa ser refeita antes de aplicar */
+    catalogFingerprint: text('catalog_fingerprint').notNull(),
+    plan: jsonb('plan').$type<ImportPlan>().notNull(),
+    summary: jsonb('summary').$type<CatalogImportSummary>().notNull(),
+    result: jsonb('result').$type<ApplyResult>(),
+    syncReport: jsonb('sync_report').$type<SyncReport>(),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: integer('created_by').references(() => users.id),
+    appliedAt: timestamp('applied_at', { withTimezone: true }),
+    appliedBy: integer('applied_by').references(() => users.id),
+    /** montagens de palete: início da atualização enquanto SYNCING (para liberar uma presa); fim quando SYNCED/SYNC_FAILED */
+    syncedAt: timestamp('synced_at', { withTimezone: true }),
+  },
+  (t) => [
+    check('catalog_import_status_chk', sql`${t.status} IN ('PREVIEW','APPLIED','SYNCING','SYNCED','SYNC_FAILED','DISCARDED','SUPERSEDED')`),
+    index('catalog_import_created_idx').on(t.createdAt),
+  ],
 )

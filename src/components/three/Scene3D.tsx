@@ -18,6 +18,8 @@ export interface SubBox {
   print?: string
   /** adesivo da marca numa face lateral (imagem + tamanho real), complementar ao texto */
   brand?: BrandArt
+  /** lona/filme em ROLO (ver domain/packShape): desenha o rolo nas pontas; ausente = pelo texto impresso (SKU LS-…) */
+  roll?: boolean
 }
 
 /** arte do adesivo de marca (ver domain/brandLabels) */
@@ -38,6 +40,8 @@ export interface SceneBody {
   print?: string
   /** adesivo da marca (volume solto) */
   brand?: BrandArt
+  /** volume solto em ROLO (lona/filme); ausente = pelo texto impresso (SKU LS-…) */
+  roll?: boolean
   /** só contexto (translúcido, sem cliques): usado ao editar o interior de um palete */
   dim?: boolean
   label?: string
@@ -490,7 +494,10 @@ function AxisGizmo({ b, active, onAxisDown }: { b: SceneBody; active: Axis | nul
   )
 }
 
-/** lonas (SKU LS-…) são ROLOS dentro da caixa: nas pontas aparece o rolo e o cone (furo) onde a lona é enrolada */
+/**
+ * lonas são ROLOS dentro da caixa: nas pontas aparece o rolo e o cone (furo) onde a lona é enrolada. Quem monta a
+ * cena informa `roll` (domain/packShape: formato do catálogo); sem ele, vale o SKU legado impresso (LS-…).
+ */
 const isRollSku = (sku?: string) => Boolean(sku && /^LS-/i.test(sku))
 
 function RollEnds({ min, size }: { min: Vec3; size: Vec3 }) {
@@ -713,7 +720,8 @@ function Body({ b, onDown, onUp, onDouble, showPrint, sideOf }: { b: SceneBody; 
     return (
       <group>
         {(b.parts ?? [{ min: b.min, size: b.size, color: b.color }]).map((s, i) => (
-          <Box key={i} {...s} opacity={0.15} edgeOpacity={0.15} />
+          // contexto atenuado: sem as pontas do rolo (como sempre foi)
+          <Box key={i} {...s} roll={false} opacity={0.15} edgeOpacity={0.15} />
         ))}
       </group>
     )
@@ -728,9 +736,9 @@ function Body({ b, onDown, onUp, onDouble, showPrint, sideOf }: { b: SceneBody; 
       }}
     >
       {b.parts ? (
-        b.parts.map((s, i) => <Box key={i} {...s} roll={isRollSku(s.print)} opacity={b.staged ? 0.55 : s.opacity} print={showPrint ? s.print : undefined} brand={showPrint ? s.brand : undefined} sideOf={sideOf} />)
+        b.parts.map((s, i) => <Box key={i} {...s} roll={s.roll ?? isRollSku(s.print)} opacity={b.staged ? 0.55 : s.opacity} print={showPrint ? s.print : undefined} brand={showPrint ? s.brand : undefined} sideOf={sideOf} />)
       ) : (
-        <Box min={b.min} size={b.size} color={b.color} roll={isRollSku(b.print)} opacity={b.staged ? 0.55 : 1} edge={b.invalid ? '#d62728' : '#1f2a33'} edgeOpacity={b.invalid ? 1 : 0.55} print={showPrint ? b.print : undefined} brand={showPrint ? b.brand : undefined} sideOf={sideOf} />
+        <Box min={b.min} size={b.size} color={b.color} roll={b.roll ?? isRollSku(b.print)} opacity={b.staged ? 0.55 : 1} edge={b.invalid ? '#d62728' : '#1f2a33'} edgeOpacity={b.invalid ? 1 : 0.55} print={showPrint ? b.print : undefined} brand={showPrint ? b.brand : undefined} sideOf={sideOf} />
       )}
       {(hl || b.parts) && (
         <mesh position={[b.min.x + b.size.x / 2, b.min.y + b.size.y / 2, b.min.z + b.size.z / 2]}>

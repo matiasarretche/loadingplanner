@@ -125,6 +125,16 @@ export interface FrozenPricing {
   lines: Record<string, PriceResolution>
 }
 
+/**
+ * Agente cuja comissão vale para preços congelados (re-congelamento): o agente da carga se estiver ativo
+ * (agente inativo não aplica comissão, como no cálculo ao vivo) ou se já for o agente congelado
+ * (desativar o agente não tira a comissão de uma versão já aprovada com ele). Senão, nenhum.
+ */
+export function commissionAgentId(planAgent: { id: number; active: boolean } | null | undefined, frozenAgentId: number | null | undefined): number | null {
+  if (!planAgent) return null
+  return planAgent.active || planAgent.id === frozenAgentId ? planAgent.id : null
+}
+
 /** Quantidades por SKU (unidades de venda) e o snapshot da embalagem. */
 export function skuQuantities(doc: LoadDoc): Map<string, { pack: PackSnapshot; units: number; boxes: number }> {
   const acc = new Map<string, { pack: PackSnapshot; units: number; boxes: number }>()
