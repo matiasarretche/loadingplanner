@@ -1,0 +1,272 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790705995964,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790893080474,
+      "tag": "0001_family_active",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790898587341,
+      "tag": "0002_drop_pallet_max_height",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790946777062,
+      "tag": "0003_ai_assistant",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791207607945,
+      "tag": "0004_ai_cost",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791210504891,
+      "tag": "0005_variant_price",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791230845714,
+      "tag": "0006_air_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791298706808,
+      "tag": "0007_product_brand",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791376250307,
+      "tag": "0008_product_thickness",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791377221542,
+      "tag": "0009_product_dimensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791381759338,
+      "tag": "0010_business_areas",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791384123489,
+      "tag": "0011_user_avatar",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791384150869,
+      "tag": "0012_user_avatar_image",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791393739843,
+      "tag": "0013_axle_distribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791480372740,
+      "tag": "0014_export_prices",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791481827530,
+      "tag": "0015_price_rule_relative",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791482311311,
+      "tag": "0016_brand_price_adjustment",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791482670572,
+      "tag": "0017_agents_commissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791483332017,
+      "tag": "0018_frozen_pricing",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791485858180,
+      "tag": "0019_commission_agent_family",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791488469300,
+      "tag": "0020_shipment_places",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791489072655,
+      "tag": "0021_price_quotes",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791489106056,
+      "tag": "0022_price_quotes_keep",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791489922290,
+      "tag": "0023_proforma_carriers_cif",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791490503729,
+      "tag": "0024_price_quotes_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791498608729,
+      "tag": "0025_load_photos",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791500398383,
+      "tag": "0026_load_photo_medium",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791549962337,
+      "tag": "0027_shipment_service",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791555372921,
+      "tag": "0028_load_plan_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791566181367,
+      "tag": "0029_edit_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791566273707,
+      "tag": "0030_edit_lock_fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791566622921,
+      "tag": "0031_login_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791567781343,
+      "tag": "0032_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791804363976,
+      "tag": "0033_family_price_band",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791805277010,
+      "tag": "0034_shipment_road_ltl",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791829136453,
+      "tag": "0035_family_technology",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791896110447,
+      "tag": "0036_export_tracking",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791903834609,
+      "tag": "0037_audit_user_index",
+      "breakpoints": true
+    }
+  ]
+}

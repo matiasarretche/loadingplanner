@@ -1,0 +1,1 @@
+ALTER TABLE "pallet_type" DROP COLUMN "max_total_height_mm";

@@ -1,0 +1,1 @@
+ALTER TABLE "product_variant" ADD COLUMN "brand" text DEFAULT 'Pacifil' NOT NULL;

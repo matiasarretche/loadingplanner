@@ -1,0 +1,1 @@
+ALTER TABLE "load_photo" ADD COLUMN "medium" "bytea";

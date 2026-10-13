@@ -1,0 +1,1 @@
+ALTER TABLE "load_plan_version" ADD COLUMN "pricing" jsonb;

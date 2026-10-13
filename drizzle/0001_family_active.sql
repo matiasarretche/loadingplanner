@@ -1,0 +1,1 @@
+ALTER TABLE "product_family" ADD COLUMN "active" boolean DEFAULT true NOT NULL;

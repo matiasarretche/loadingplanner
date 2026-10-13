@@ -1,0 +1,1 @@
+ALTER TYPE "public"."shipment_service" ADD VALUE 'ROAD_LTL' BEFORE 'AIR_LOOSE';
