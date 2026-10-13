@@ -4,19 +4,15 @@ import { db, schema } from '@/db'
 import { bandPriceKey, brandKey, buildPriceTwins, commissionKey, diameterFtOf, PriceBand, PricedProduct, PricingPayload, quotePrice, priceKey, PriceMethod, PricingConfig, WATER_TANK_FAMILY } from '@/domain/exportPricing'
 import { countryCode } from './countries'
 
-/** chave do recargo CIF padrão em export_price_setting */
-export const CIF_SETTING = 'cif_usd_per_kg'
-
-/** Configuração comercial vigente (categorias, países, regras e preços por família). */
+/** Configuração comercial vigente (categorias, países, regras e preços por família, recargo CIF de cada família). */
 export async function loadPricingConfig(): Promise<PricingConfig> {
-  const [categories, countries, rules, prices, brands, commissions, settings, priceTwin, bands] = await Promise.all([
+  const [categories, countries, rules, prices, brands, commissions, priceTwin, bands] = await Promise.all([
     db.select().from(schema.priceCategories),
     db.select().from(schema.countryPriceCategories),
     db.select().from(schema.familyPriceRules),
     db.select().from(schema.familyPrices),
     db.select().from(schema.brandPriceAdjustments),
     db.select().from(schema.commissionRates),
-    db.select().from(schema.exportPriceSettings),
     loadPriceTwins(),
     loadPriceBands(),
   ])
@@ -24,7 +20,6 @@ export async function loadPricingConfig(): Promise<PricingConfig> {
     categories: categories.sort((a, b) => a.sort - b.sort || a.code.localeCompare(b.code)).map((c) => ({ id: c.id, code: c.code, name: c.name, active: c.active })),
     countryCategory: new Map(countries.map((c) => [c.countryCode, c.categoryId])),
     familyRule: new Map(rules.map((r) => [r.familyId, { method: r.method as PriceMethod, refFamilyId: r.refFamilyId, markupPct: r.markupPct, cifUsdPerKg: r.cifUsdPerKg }])),
-    cifDefaultUsdPerKg: settings.find((x) => x.key === CIF_SETTING)?.value ?? null,
     brandAdjust: new Map(brands.map((b) => [brandKey(b.brand), b.pct])),
     commission: new Map(commissions.map((c) => [commissionKey(c.agentId, c.familyId), c.pct])),
     familyPrice: new Map(prices.map((p) => [priceKey(p.familyId, p.categoryId), { usdPerKg: p.usdPerKg, fixedUsdPerUnit: p.fixedUsdPerUnit }])),
@@ -132,7 +127,6 @@ export async function pricingPayload(): Promise<PricingPayload> {
     familyPrice: [...cfg.familyPrice],
     brandAdjust: [...(cfg.brandAdjust ?? [])],
     commission: [...(cfg.commission ?? [])],
-    cifDefaultUsdPerKg: cfg.cifDefaultUsdPerKg ?? null,
     priceTwin: [...(cfg.priceTwin ?? [])],
     familyBands: [...(cfg.familyBands ?? [])],
     bandPrice: [...(cfg.bandPrice ?? [])],

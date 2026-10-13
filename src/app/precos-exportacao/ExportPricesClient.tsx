@@ -10,7 +10,7 @@ import { parseMoney } from '@/domain/paymentTerms'
 import { PriceListButton } from './PriceListDialog'
 import type { FamilyTech } from '@/domain/technology'
 import type { PriceListItem } from '@/lib/priceList'
-import { saveCategoryAction, setBrandAdjustAction, setCifDefaultAction, setCommissionAction, setFamilyBandPricesAction, setFamilyCifAction, setCountryCategoryAction, setFamilyMethodAction, setFamilyPriceAction } from './actions'
+import { saveCategoryAction, setBrandAdjustAction, setCommissionAction, setFamilyBandPricesAction, setFamilyCifAction, setCountryCategoryAction, setFamilyMethodAction, setFamilyPriceAction } from './actions'
 
 interface Category { id: number; code: string; name: string; sort: number; active: boolean }
 interface Country { code: string; name: string; categoryId: number | null }
@@ -50,7 +50,7 @@ const usd2 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumF
 const kgf = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 3 })
 const numIn = (v: number | null | undefined) => (v == null ? '' : String(v).replace('.', ','))
 
-export function ExportPricesClient(p: { canEdit: boolean; categories: Category[]; countries: Country[]; families: FamilyRow[]; products: Product[]; brands: BrandRow[]; agents: Agent[]; commissions: CommissionRow[]; quotes: IssuedQuote[]; listItems: PriceListItem[]; priceTwin: [string, PriceTwin | null][]; skuDiameterFt: [string, number][]; cifDefault: number | null; history: HistoryRow[] }) {
+export function ExportPricesClient(p: { canEdit: boolean; categories: Category[]; countries: Country[]; families: FamilyRow[]; products: Product[]; brands: BrandRow[]; agents: Agent[]; commissions: CommissionRow[]; quotes: IssuedQuote[]; listItems: PriceListItem[]; priceTwin: [string, PriceTwin | null][]; skuDiameterFt: [string, number][]; history: HistoryRow[] }) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('precos')
   const [msg, setMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
@@ -88,12 +88,12 @@ export function ExportPricesClient(p: { canEdit: boolean; categories: Category[]
         ))}
       </div>
       {msg && <div className={`alert ${msg.type}`}>{msg.text}</div>}
-      {tab === 'precos' && <FamilyPrices {...p} active={active} busy={busy} act={act} cifDefault={p.cifDefault} />}
+      {tab === 'precos' && <FamilyPrices {...p} active={active} busy={busy} act={act} />}
       {tab === 'marcas' && <Brands {...p} busy={busy} act={act} />}
       {tab === 'comissoes' && <Commissions {...p} busy={busy} act={act} />}
       {tab === 'paises' && <Countries {...p} active={active} busy={busy} act={act} />}
       {tab === 'categorias' && <Categories {...p} busy={busy} act={act} />}
-      {tab === 'produtos' && <ProductPrices {...p} active={active} cifDefault={p.cifDefault} />}
+      {tab === 'produtos' && <ProductPrices {...p} active={active} />}
       {tab === 'cotacoes' && <Quotes quotes={p.quotes} />}
       {tab === 'historico' && <History {...p} />}
     </>
@@ -103,7 +103,7 @@ export function ExportPricesClient(p: { canEdit: boolean; categories: Category[]
 type Act = (fn: () => Promise<{ ok: true } | { ok: false; error: string }>, okText: string) => Promise<boolean>
 
 /** Matriz família × categoria: regra da família e USD/kg (+ fixo USD/unidade quando a regra pede). */
-function FamilyPrices({ families, active, canEdit, busy, act, cifDefault }: { families: FamilyRow[]; active: Category[]; canEdit: boolean; busy: boolean; act: Act; cifDefault: number | null }) {
+function FamilyPrices({ families, active, canEdit, busy, act }: { families: FamilyRow[]; active: Category[]; canEdit: boolean; busy: boolean; act: Act }) {
   const [edit, setEdit] = useState<Record<string, { kg: string; fixed: string }>>({})
   const [bandEdit, setBandEdit] = useState<Record<string, Record<string, string>>>({})
   const [cifEdit, setCifEdit] = useState<Record<string, string>>({})
@@ -113,18 +113,12 @@ function FamilyPrices({ families, active, canEdit, busy, act, cifDefault }: { fa
     return { k, cur, v: edit[k] ?? { kg: numIn(cur?.usdPerKg), fixed: numIn(cur?.fixedUsdPerUnit) } }
   }
   if (!active.length) return <div className="alert warn">Nenhuma categoria ativa. Cadastre as categorias em “Categorias de mercado”.</div>
-  const cifDef = cifEdit.default ?? numIn(cifDefault)
   return (
     <div className="panel" style={{ overflowX: 'auto' }}>
-      <div className="row" style={{ gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <strong>Recargo CIF padrão</strong>
-        <input style={{ width: 70, textAlign: 'right' }} inputMode="decimal" value={cifDef} disabled={!canEdit || busy} onChange={(e) => setCifEdit({ ...cifEdit, default: e.target.value })} /> <small className="muted">USD/kg líquido</small>
-        {cifEdit.default != null && cifEdit.default !== numIn(cifDefault) && (
-          <button className="small primary" disabled={busy} onClick={() => void act(() => setCifDefaultAction(cifDef), 'Recargo CIF padrão salvo.').then(() => setCifEdit((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'default'))))}>
-            Salvar
-          </button>
-        )}
-        <small className="muted">Só em cotações CIF: soma peso líquido × recargo ao preço (depois do ajuste da marca; o fixo por unidade continua). Cada família pode ter o seu na última coluna.</small>
+      <div style={{ marginBottom: 8 }}>
+        <small className="muted">
+          Recargo CIF (só em cotações CIF): peso líquido × recargo da família (última coluna), somado ao preço (depois do ajuste da marca; o fixo por unidade continua). Família sem recargo fica sem preço em CIF.
+        </small>
       </div>
       <table className="data">
         <thead>
@@ -136,7 +130,9 @@ function FamilyPrices({ families, active, canEdit, busy, act, cifDefault }: { fa
                 {c.name}
               </th>
             ))}
-            <th className="num" title="Recargo CIF próprio da família (vazio = padrão)">Recargo CIF USD/kg</th>
+            <th className="num" title="Recargo CIF da família (USD por kg líquido), só em cotações CIF. Vazio = a família fica sem preço em CIF">
+              Recargo CIF USD/kg
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -244,7 +240,7 @@ function FamilyPrices({ families, active, canEdit, busy, act, cifDefault }: { fa
                     <input
                       style={{ width: 62, textAlign: 'right' }}
                       inputMode="decimal"
-                      placeholder={cifDefault != null ? `${numIn(cifDefault)} (padrão)` : '—'}
+                      placeholder="—"
                       value={cifEdit[f.id] ?? numIn(f.cifUsdPerKg)}
                       disabled={!canEdit || busy}
                       onChange={(e) => setCifEdit({ ...cifEdit, [f.id]: e.target.value })}
@@ -254,7 +250,11 @@ function FamilyPrices({ families, active, canEdit, busy, act, cifDefault }: { fa
                         Salvar
                       </button>
                     )}
-                    {f.cifUsdPerKg == null && cifEdit[f.id] == null && <small className="muted" style={{ display: 'block', fontSize: 10 }}>usa o padrão</small>}
+                    {f.cifUsdPerKg == null && cifEdit[f.id] == null && (
+                      <small style={{ display: 'block', fontSize: 10, color: 'var(--warn)' }} title="Sem recargo CIF a família fica sem preço em cotações CIF">
+                        obrigatório p/ cotar CIF
+                      </small>
+                    )}
                   </>
                 )}
               </td>
@@ -574,7 +574,7 @@ function Categories({ categories, countries, canEdit, busy, act }: { categories:
 }
 
 /** Preço unitário resultante de cada produto do catálogo (peso líquido atual) numa categoria; simulação com preço manual. */
-function ProductPrices({ products, families, active, brands, agents, commissions, cifDefault, priceTwin, skuDiameterFt }: { products: Product[]; families: FamilyRow[]; active: Category[]; brands: BrandRow[]; agents: Agent[]; commissions: CommissionRow[]; cifDefault: number | null; priceTwin: [string, PriceTwin | null][]; skuDiameterFt: [string, number][] }) {
+function ProductPrices({ products, families, active, brands, agents, commissions, priceTwin, skuDiameterFt }: { products: Product[]; families: FamilyRow[]; active: Category[]; brands: BrandRow[]; agents: Agent[]; commissions: CommissionRow[]; priceTwin: [string, PriceTwin | null][]; skuDiameterFt: [string, number][] }) {
   const [incoterm, setIncoterm] = useState('FOB')
   const [agent, setAgent] = useState<number | 'none' | 'manual'>('none')
   const [manualPct, setManualPct] = useState('')
@@ -586,7 +586,6 @@ function ProductPrices({ products, families, active, brands, agents, commissions
   const cfg = useMemo(
     () => ({
       familyRule: new Map<number, FamilyRule>(families.map((f) => [f.id, { method: f.method, refFamilyId: f.refFamilyId, markupPct: f.markupPct, cifUsdPerKg: f.cifUsdPerKg }])),
-      cifDefaultUsdPerKg: cifDefault,
       brandAdjust: new Map(brands.filter((b) => b.pct).map((b) => [brandKey(b.brand), b.pct])),
       commission: new Map(commissions.map((c) => [commissionKey(c.agentId, c.familyId), c.pct])),
       familyPrice: new Map(families.flatMap((f) => f.prices.map((x) => [priceKey(f.id, x.categoryId), { usdPerKg: x.usdPerKg, fixedUsdPerUnit: x.fixedUsdPerUnit }] as const))),
@@ -597,7 +596,7 @@ function ProductPrices({ products, families, active, brands, agents, commissions
       bandPrice: new Map(families.flatMap((f) => f.bandPrices.filter((x) => x.usdPerKg != null).map((x) => [bandPriceKey(f.id, x.categoryId, x.bandKey), x.usdPerKg!] as const))),
       skuDiameterFt: new Map(skuDiameterFt),
     }),
-    [families, brands, commissions, cifDefault, priceTwin, skuDiameterFt],
+    [families, brands, commissions, priceTwin, skuDiameterFt],
   )
   const rows = products.filter((x) => (fam === 'all' || x.familyId === fam) && (!q || `${x.sku} ${x.name}`.toLowerCase().includes(q.toLowerCase())))
   return (
@@ -841,7 +840,7 @@ function History({ history, families, categories, countries, agents }: { history
     return h.field === 'usdPerKg' || h.field.startsWith('usdPerKg:') || h.field === 'fixedUsdPerUnit' ? usd.format(Number(v)) : v
   }
   const what = (h: HistoryRow) =>
-    h.kind === 'cif' ? (h.familyId ? `Recargo CIF · ${fam(h.familyId)}` : 'Recargo CIF padrão') : h.kind === 'brand_adjust' ? 'Ajuste por marca' : h.kind === 'commission' ? `Comissão · ${fam(h.familyId)}` : h.kind === 'family_price' ? `${fam(h.familyId)} · ${cat(h.categoryId)}` : h.kind === 'family_rule' ? fam(h.familyId) : h.kind === 'country_category' ? country(h.countryCode) : `Categoria ${cat(h.categoryId)}`
+    h.kind === 'cif' ? (h.familyId ? `Recargo CIF · ${fam(h.familyId)}` : 'Recargo CIF padrão') : h.kind === 'cif_default' ? 'Recargo CIF padrão (extinto: agora só por família)' : h.kind === 'brand_adjust' ? 'Ajuste por marca' : h.kind === 'commission' ? `Comissão · ${fam(h.familyId)}` : h.kind === 'family_price' ? `${fam(h.familyId)} · ${cat(h.categoryId)}` : h.kind === 'family_rule' ? fam(h.familyId) : h.kind === 'country_category' ? country(h.countryCode) : `Categoria ${cat(h.categoryId)}`
   if (!history.length) return <div className="panel muted">Nenhuma alteração registrada ainda.</div>
   return (
     <div className="panel">

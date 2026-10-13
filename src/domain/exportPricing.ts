@@ -21,8 +21,9 @@
  * 14 pés), por categoria. O sistema lê o diâmetro do produto e usa a faixa dele; diâmetro fora de todas as faixas →
  * a faixa de CENTRO mais próximo (empate: a menor). Ex.: 8,5 → 5 a 8; 13 → 14.
  *
- * Cotação CIF: RECARGO CIF por kg líquido (padrão geral, ex.: USD 0,05/kg; cada família pode ter o seu,
- * ex.: Hidrosilo e Hidroforce) somado ao preço depois da marca; o fixo por unidade continua. Só CIF.
+ * Cotação CIF: RECARGO CIF por kg líquido, SEMPRE o da família (ex.: Hidrosilo e Hidroforce USD 0,10/kg; as
+ * demais 0,05) somado ao preço depois da marca; o fixo por unidade continua. Só CIF. Família sem recargo
+ * definido → sem preço em CIF (nunca cota CIF com recargo zero por omissão); os outros Incoterms não mudam.
  * Depois da regra da família vale o AJUSTE POR MARCA (% sobre o preço de lista; ex.: Ecobag −5%).
  * Venda via AGENTE: comissão incluída no preço, como % do preço FINAL faturado: preço = base ÷ (1 − %).
  * O % vem do PERFIL DO AGENTE, por família (o país não influi na comissão). Sem % para a família →
@@ -50,7 +51,7 @@ export interface FamilyRule {
   method: PriceMethod
   refFamilyId?: number | null
   markupPct?: number | null
-  /** recargo CIF próprio da família (USD/kg líquido); null = o padrão geral */
+  /** recargo CIF da família (USD/kg líquido); null = não definido → sem preço em cotações CIF */
   cifUsdPerKg?: number | null
 }
 
@@ -122,8 +123,6 @@ export interface PricingConfig {
   brandAdjust?: Map<string, number>
   /** comissão: `${agentId}:${familyId}` → % (perfil do agente) */
   commission?: Map<string, number>
-  /** recargo CIF padrão (USD/kg líquido) para famílias sem valor próprio */
-  cifDefaultUsdPerKg?: number | null
   /** SKU (maiúsculas) de 3 m → Hidrosilo de 2 m da mesma capacidade cujo peso define o preço; null = sem equivalente */
   priceTwin?: Map<string, PriceTwin | null>
   /** família → faixas de diâmetro com USD/kg próprio (Silo-bolsa) */
@@ -234,19 +233,24 @@ export function twinsWithSnapshot(priceTwin: Map<string, PriceTwin | null> | und
 /** motivo de "sem preço" de um 3 m sem Hidrosilo 2 m equivalente */
 export const NO_TWIN_REASON = '3 m de largura sem Hidrosilo de 2 m da mesma capacidade no catálogo (o 3 m não é calculado por kg)'
 
-/** Recargo CIF (USD/kg) da família: o próprio ou o padrão geral. */
-export function cifRateFor(cfg: Pick<PricingConfig, 'familyRule' | 'cifDefaultUsdPerKg'>, familyId: number): number | null {
-  const own = cfg.familyRule.get(familyId)?.cifUsdPerKg
-  return own != null ? own : cfg.cifDefaultUsdPerKg ?? null
+/** motivo de "sem preço" em CIF de uma família sem recargo CIF definido */
+export const NO_CIF_REASON = 'sem recargo CIF definido para a família'
+
+/** Recargo CIF (USD/kg) da família; null = não definido (sem preço em CIF). */
+export function cifRateFor(cfg: Pick<PricingConfig, 'familyRule'>, familyId: number): number | null {
+  return cfg.familyRule.get(familyId)?.cifUsdPerKg ?? null
 }
 
 /**
- * Cotação CIF: soma o recargo por kg líquido ao preço (depois da marca; o fixo por unidade continua).
- * Produto "incluído" (KIT-HF) continua 0. Outro Incoterm → inalterado.
+ * Cotação CIF: soma o recargo por kg líquido da família ao preço (depois da marca; o fixo por unidade
+ * continua). Família sem recargo definido → sem preço (como um preço que falta). Produto "incluído"
+ * (KIT-HF) continua 0. Outro Incoterm → inalterado.
  */
-export function applyCifSurcharge(r: UnitPriceResult, cfg: Pick<PricingConfig, 'familyRule' | 'cifDefaultUsdPerKg'>, familyId: number, incoterm: string | null | undefined): UnitPriceResult {
+export function applyCifSurcharge(r: UnitPriceResult, cfg: Pick<PricingConfig, 'familyRule'>, familyId: number, incoterm: string | null | undefined): UnitPriceResult {
   if (!r.ok || r.method === 'INCLUDED' || !appliesCifSurcharge(incoterm)) return r
   const rate = cifRateFor(cfg, familyId)
+  if (rate == null) return { ok: false, reason: NO_CIF_REASON }
+  // recargo 0 informado de propósito: CIF sem acréscimo
   if (!rate) return r
   const add = r.netKg * rate
   return { ...r, unitUsd: r.unitUsd + add, cifUsdPerKg: rate, cifSurchargeUsd: r2(add) }
@@ -351,7 +355,7 @@ export function familyUnitPrice(
  * Hidrosilo / Hidroforce de 3 m: com o peso do Hidrosilo de 2 m da mesma capacidade (ver buildPriceTwins).
  */
 export function listUnitPrice(
-  cfg: Pick<PricingConfig, 'familyRule' | 'familyPrice' | 'brandAdjust' | 'cifDefaultUsdPerKg' | 'priceTwin' | 'familyBands' | 'bandPrice' | 'skuDiameterFt'>,
+  cfg: Pick<PricingConfig, 'familyRule' | 'familyPrice' | 'brandAdjust' | 'priceTwin' | 'familyBands' | 'bandPrice' | 'skuDiameterFt'>,
   p: PricedProduct,
   categoryId: number,
   incoterm: string | null | undefined,
@@ -425,7 +429,6 @@ export interface PricingPayload {
   familyPrice: [string, FamilyPriceValues][]
   brandAdjust: [string, number][]
   commission: [string, number][]
-  cifDefaultUsdPerKg: number | null
   /** Hidrosilo / Hidroforce de 3 m → Hidrosilo de 2 m da mesma capacidade */
   priceTwin: [string, PriceTwin | null][]
   /** faixas de diâmetro por família, USD/kg de cada faixa por categoria e diâmetro (pés) dos SKUs dessas famílias */
@@ -445,7 +448,6 @@ export function configFromPayload(p: PricingPayload): PricingConfig {
     familyPrice: new Map(p.familyPrice),
     brandAdjust: new Map(p.brandAdjust),
     commission: new Map(p.commission),
-    cifDefaultUsdPerKg: p.cifDefaultUsdPerKg,
     priceTwin: new Map(p.priceTwin ?? []),
     familyBands: new Map(p.familyBands ?? []),
     bandPrice: new Map(p.bandPrice ?? []),

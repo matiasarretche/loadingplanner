@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bandFor, bandPriceKey, buildPriceTwins, categoryOfCountry, diameterFtOf, NO_TWIN_REASON, roundUpUsd, twinsWithSnapshot, commissionKey, commissionRateFor, priceForProduct, priceKey, PricingConfig, quoteLineTotal, quotePrice, unitPriceFor, withCommission } from './exportPricing'
+import { bandFor, bandPriceKey, buildPriceTwins, categoryOfCountry, configFromPayload, diameterFtOf, NO_CIF_REASON, NO_TWIN_REASON, roundUpUsd, twinsWithSnapshot, commissionKey, commissionRateFor, priceForProduct, priceKey, PricingConfig, quoteLineTotal, quotePrice, unitPriceFor, withCommission } from './exportPricing'
 
 // valores ilustrativos só para o teste (não são preços da Pacifil)
 const cfg: PricingConfig = {
@@ -27,6 +27,12 @@ const cfg: PricingConfig = {
     [priceKey(20, 2), { usdPerKg: 3, fixedUsdPerUnit: 15 }],
   ]),
 }
+
+/** recargo CIF por família (USD/kg); só as famílias informadas mudam */
+const withCif = (c: PricingConfig, cif: Record<number, number | null>): PricingConfig => ({
+  ...c,
+  familyRule: new Map([...c.familyRule].map(([id, r]) => [id, id in cif ? { ...r, cifUsdPerKg: cif[id] } : r])),
+})
 
 describe('preços de exportação', () => {
   it('USD/kg sobre o peso LÍQUIDO', () => {
@@ -74,15 +80,15 @@ describe('preços de exportação', () => {
   it('sem arredondar a centavos no meio: 20,001 kg × 2,50 = 50,0025 → 51 (não 50)', () => {
     const c4: PricingConfig = { ...cfg, familyPrice: new Map([[priceKey(10, 1), { usdPerKg: 2.5, fixedUsdPerUnit: null }]]) }
     expect(quotePrice(c4, { sku: 'SB', familyId: 10, netKg: 20.001 }, 'UY')).toMatchObject({ unitUsd: 51 })
-    expect(quotePrice({ ...c4, cifDefaultUsdPerKg: 0.05 }, { sku: 'SB', familyId: 10, netKg: 20.001 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ unitUsd: 52 })
+    expect(quotePrice(withCif(c4, { 10: 0.05 }), { sku: 'SB', familyId: 10, netKg: 20.001 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ unitUsd: 52 })
   })
   it('preço final sempre PARA CIMA ao dólar inteiro', () => {
     expect([roundUpUsd(51.01), roundUpUsd(51.54), roundUpUsd(52), roundUpUsd(52.0000001)]).toEqual([52, 52, 52, 52])
     // Ecobag: 200 × 0,95 = 190 (exato, fica 190); HS 10 kg × 3 + 15 = 45
     expect(quotePrice(cfg, { sku: 'HS', familyId: 20, netKg: 10.3 }, 'MX')).toMatchObject({ ok: true, baseUnitUsd: 45.9, unitUsd: 46 })
   })
-  it('CIF: recargo por kg líquido (padrão ou da família), depois da marca, mantendo o fixo; só CIF', () => {
-    const c2: PricingConfig = { ...cfg, cifDefaultUsdPerKg: 0.05, familyRule: new Map([...cfg.familyRule, [20, { method: 'PER_KG_PLUS_FIXED', cifUsdPerKg: 0.2 }]]) }
+  it('CIF: recargo por kg líquido da família, depois da marca, mantendo o fixo; só CIF', () => {
+    const c2 = withCif(cfg, { 10: 0.05, 20: 0.2 })
     // Silo-bolsa UY: 100 kg × 2 = 200; CIF + 100 × 0,05 = 205
     expect(priceForProduct(c2, { sku: 'SB', familyId: 10, netKg: 100 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ ok: true, unitUsd: 205, cifUsdPerKg: 0.05, cifSurchargeUsd: 5 })
     expect(priceForProduct(c2, { sku: 'SB', familyId: 10, netKg: 100 }, 'UY', { incoterm: 'FOB' })).toMatchObject({ ok: true, unitUsd: 200 })
@@ -96,6 +102,47 @@ describe('preços de exportação', () => {
     // com agente: comissão sobre o preço CIF e para cima ao dólar: 205 ÷ 0,95 = 215,79 → 216
     const c3: PricingConfig = { ...c2, commission: new Map([[commissionKey(7, 10), 5]]) }
     expect(quotePrice(c3, { sku: 'SB', familyId: 10, netKg: 100 }, 'UY', { agentId: 7, incoterm: 'CIF' })).toMatchObject({ unitUsd: 216 })
+  })
+  describe('CIF: recargo SEMPRE da família (não há padrão geral)', () => {
+    // Hidrosilo (20) e Hidroforce (40) 0,10/kg; Silo-bolsa (10) 0,05/kg
+    const c = withCif(cfg, { 10: 0.05, 20: 0.1, 40: 0.1 })
+    it('usa o recargo da própria família', () => {
+      // Silo-bolsa UY: 100 kg × 2 = 200 + 100 × 0,05 = 205
+      expect(priceForProduct(c, { sku: 'SB', familyId: 10, netKg: 100 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ ok: true, unitUsd: 205, cifUsdPerKg: 0.05, cifSurchargeUsd: 5 })
+      // Hidrosilo MX: 10 × 3 + 15 = 45 + 10 × 0,10 = 46
+      expect(priceForProduct(c, { sku: 'HS', familyId: 20, netKg: 10 }, 'MX', { incoterm: 'CIF' })).toMatchObject({ ok: true, unitUsd: 46, cifUsdPerKg: 0.1, cifSurchargeUsd: 1 })
+      // Hidroforce (relativa): Hidrosilo 45 × 1,4 = 63 + o recargo do HIDROFORCE 10 × 0,10 = 64
+      const hf = priceForProduct(c, { sku: 'HF', familyId: 40, netKg: 10 }, 'MX', { incoterm: 'CIF' })
+      expect(hf).toMatchObject({ ok: true, cifUsdPerKg: 0.1, cifSurchargeUsd: 1 })
+      expect(hf.ok && hf.unitUsd).toBeCloseTo(64, 9)
+    })
+    it('família sem recargo: sem preço em CIF (nunca recargo zero por omissão); FOB / FCA normais', () => {
+      const semHs = withCif(c, { 20: null })
+      expect(priceForProduct(semHs, { sku: 'HS', familyId: 20, netKg: 10 }, 'MX', { incoterm: 'CIF' })).toMatchObject({ ok: false, reason: NO_CIF_REASON })
+      expect(quotePrice(semHs, { sku: 'HS', familyId: 20, netKg: 10 }, 'MX', { incoterm: 'cif', agentId: 7 })).toMatchObject({ ok: false, reason: NO_CIF_REASON, commission: null })
+      expect(priceForProduct(semHs, { sku: 'HS', familyId: 20, netKg: 10 }, 'MX', { incoterm: 'FOB' })).toMatchObject({ ok: true, unitUsd: 45 })
+      expect(priceForProduct(semHs, { sku: 'HS', familyId: 20, netKg: 10 }, 'MX', { incoterm: 'FCA' })).toMatchObject({ ok: true, unitUsd: 45 })
+      expect(priceForProduct(semHs, { sku: 'HS', familyId: 20, netKg: 10 }, 'MX')).toMatchObject({ ok: true, unitUsd: 45 })
+      // relativa: vale o recargo da PRÓPRIA família, não o da família de referência
+      expect(priceForProduct(withCif(c, { 40: null }), { sku: 'HF', familyId: 40, netKg: 10 }, 'MX', { incoterm: 'CIF' })).toMatchObject({ ok: false, reason: NO_CIF_REASON })
+      // família nova, sem linha de regra (PER_KG): sem preço em CIF, com preço em FOB
+      const nova: PricingConfig = { ...c, familyPrice: new Map([...c.familyPrice, [priceKey(50, 1), { usdPerKg: 1, fixedUsdPerUnit: null }]]) }
+      expect(priceForProduct(nova, { sku: 'NOVA', familyId: 50, netKg: 10 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ ok: false, reason: NO_CIF_REASON })
+      expect(priceForProduct(nova, { sku: 'NOVA', familyId: 50, netKg: 10 }, 'UY', { incoterm: 'FOB' })).toMatchObject({ ok: true, unitUsd: 10 })
+    })
+    it('recargo 0 informado de propósito: CIF sem acréscimo', () => {
+      expect(priceForProduct(withCif(c, { 10: 0 }), { sku: 'SB', familyId: 10, netKg: 100 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ ok: true, unitUsd: 200 })
+    })
+    it('incluído (KIT-HF): continua 0 em CIF, sem precisar de recargo', () => {
+      expect(cfg.familyRule.get(30)?.cifUsdPerKg).toBeUndefined()
+      expect(priceForProduct(c, { sku: 'KIT-HF', familyId: 30, netKg: 2 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ ok: true, unitUsd: 0 })
+      expect(quotePrice(c, { sku: 'KIT-HF', familyId: 30, netKg: 2 }, 'UY', { incoterm: 'CIF', agentId: 7 })).toMatchObject({ ok: true, unitUsd: 0, commission: null })
+    })
+    it('payload do navegador leva o recargo de cada família na regra', () => {
+      const back = configFromPayload({ categories: c.categories, countryCategory: [...c.countryCategory], familyRule: [...c.familyRule], familyPrice: [...c.familyPrice], brandAdjust: [], commission: [], priceTwin: [], familyBands: [], bandPrice: [], skuDiameterFt: [], products: [], agents: [] })
+      expect(priceForProduct(back, { sku: 'HS', familyId: 20, netKg: 10 }, 'MX', { incoterm: 'CIF' })).toMatchObject({ ok: true, unitUsd: 46 })
+      expect(priceForProduct(back, { sku: 'SB', familyId: 10, netKg: 100 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ ok: true, unitUsd: 205 })
+    })
   })
   it('incluído (KIT-HF) via agente: 0, sem comissão e sem exigir % (não fica sem preço)', () => {
     expect(quotePrice(cfg, { sku: 'KIT-HF', familyId: 30, netKg: 2 }, 'UY', { agentId: 7 })).toMatchObject({ ok: true, unitUsd: 0, commission: null })
@@ -132,7 +179,7 @@ describe('preços de exportação', () => {
       { sku: 'HS-3M-35K', family: 'Hidrosilo', brand: 'Pacifil', widthM: 3, capacityL: 35000, netKg: 50 },
       { sku: 'LS-3X50', family: 'Lona de silagem', brand: 'Pacifil', widthM: 3, capacityL: null, netKg: 20 },
     ])
-    const c: PricingConfig = { ...cfg, priceTwin: twins, cifDefaultUsdPerKg: 0.05 }
+    const c: PricingConfig = { ...withCif(cfg, { 10: 0.05, 20: 0.1, 40: 0.1 }), priceTwin: twins }
     it('só os 3 m de Hidrosilo / Hidroforce entram; o equivalente é sempre o Hidrosilo 2 m', () => {
       expect(twins.get('HS-3M-10K')).toEqual({ sku: 'HS-2M-10K', netKg: 22.37 })
       expect(twins.get('HF-3M-10K')).toEqual({ sku: 'HS-2M-10K', netKg: 22.37 })
@@ -229,7 +276,7 @@ describe('preços de exportação', () => {
     })
     it('marca, CIF e agente valem por cima da faixa', () => {
       expect(quotePrice(cb, { sku: 'SB-9', familyId: 10, netKg: 100, brand: 'Ecobag' }, 'UY')).toMatchObject({ unitUsd: 219 })
-      expect(quotePrice({ ...cb, cifDefaultUsdPerKg: 0.05 }, { sku: 'SB-9', familyId: 10, netKg: 100 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ unitUsd: 235 })
+      expect(quotePrice(withCif(cb, { 10: 0.05 }), { sku: 'SB-9', familyId: 10, netKg: 100 }, 'UY', { incoterm: 'CIF' })).toMatchObject({ unitUsd: 235 })
       // 230 ÷ 0,95 = 242,1 → 243
       expect(quotePrice(cb, { sku: 'SB-9', familyId: 10, netKg: 100 }, 'UY', { agentId: 7 })).toMatchObject({ unitUsd: 243 })
     })

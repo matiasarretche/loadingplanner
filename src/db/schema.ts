@@ -588,7 +588,7 @@ export const familyPriceRules = pgTable('family_price_rule', {
     .primaryKey()
     .references(() => productFamilies.id),
   method: priceMethodEnum('method').notNull().default('PER_KG'),
-  /** recargo CIF (USD/kg líquido) desta família; vazio = o padrão geral (export_price_setting cif_usd_per_kg) */
+  /** recargo CIF (USD/kg líquido) desta família, só em cotações CIF; vazio = não definido → sem preço em CIF (não há padrão geral) */
   cifUsdPerKg: numeric('cif_usd_per_kg', { precision: 12, scale: 4, mode: 'number' }),
   /** regra RELATIVE: família de referência e acréscimo em % sobre o preço dela */
   refFamilyId: integer('ref_family_id').references(() => productFamilies.id),
@@ -659,7 +659,7 @@ export const familyBandPrices = pgTable(
 /** Histórico de TODA alteração comercial (valor anterior e novo, quando e quem). Só inserção. */
 export const priceHistory = pgTable('price_history', {
   id: serial('id').primaryKey(),
-  /** 'family_price' | 'family_rule' | 'country_category' | 'category' */
+  /** 'family_price' | 'family_rule' | 'country_category' | 'category' | 'brand_adjust' | 'commission' | 'cif' | 'cif_default' */
   kind: text('kind').notNull(),
   familyId: integer('family_id'),
   categoryId: integer('category_id'),
@@ -757,7 +757,10 @@ export const priceQuotes = pgTable(
   (t) => [unique('price_quote_version_signature').on(t.loadPlanVersionId, t.signature).nullsNotDistinct()],
 )
 
-/** Parâmetros gerais de preços de exportação (chave → número). Ex.: cif_usd_per_kg = recargo CIF padrão. */
+/**
+ * Parâmetros gerais de preços de exportação (chave → número). Hoje sem uso: o recargo CIF, que era o único
+ * (cif_usd_per_kg), passou a ser só por família (family_price_rule.cif_usd_per_kg; migração 0038).
+ */
 export const exportPriceSettings = pgTable('export_price_setting', {
   key: text('key').primaryKey(),
   value: numeric('value', { precision: 12, scale: 4, mode: 'number' }).notNull(),

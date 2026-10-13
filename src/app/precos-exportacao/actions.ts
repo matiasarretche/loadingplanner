@@ -5,7 +5,6 @@ import { refreezeCommission } from '@/lib/loadPricing'
 import { revalidatePath } from 'next/cache'
 import { db, schema } from '@/db'
 import type { PriceMethod } from '@/domain/exportPricing'
-import { CIF_SETTING } from '@/lib/exportPricing'
 import { canAccessArea } from '@/lib/areas'
 import { assertUser, AuthError } from '@/lib/auth'
 
@@ -161,23 +160,10 @@ export async function setCommissionAction(agentId: number, familyId: number, pct
   })
 }
 
-/** Recargo CIF padrão (USD/kg líquido) — vale para as famílias sem valor próprio. */
-export async function setCifDefaultAction(value: string): Promise<Res> {
-  return run(async () => {
-    const me = await editor()
-    const v = money(value, 'Recargo CIF')
-    if (v == null) throw new Error('Informe o recargo CIF padrão (USD/kg).')
-    await db.transaction(async (tx) => {
-      const cur = await tx.query.exportPriceSettings.findFirst({ where: eq(schema.exportPriceSettings.key, CIF_SETTING) })
-      if (cur?.value === v) return
-      if (cur) await tx.update(schema.exportPriceSettings).set({ value: v, updatedAt: new Date(), updatedBy: me.id }).where(eq(schema.exportPriceSettings.key, CIF_SETTING))
-      else await tx.insert(schema.exportPriceSettings).values({ key: CIF_SETTING, value: v, updatedBy: me.id })
-      await history(tx, me.id, { kind: 'cif' }, [['cifDefault', cur?.value ?? null, v]])
-    })
-  })
-}
-
-/** Recargo CIF próprio da família (USD/kg líquido); vazio = usa o padrão geral. */
+/**
+ * Recargo CIF da família (USD/kg líquido; não há padrão geral). Vazio = sem recargo definido: a família
+ * fica sem preço em cotações CIF (os outros Incoterms não mudam).
+ */
 export async function setFamilyCifAction(familyId: number, value: string): Promise<Res> {
   return run(async () => {
     const me = await editor()

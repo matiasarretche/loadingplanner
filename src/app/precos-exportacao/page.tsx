@@ -7,7 +7,7 @@ import { canAccessArea } from '@/lib/areas'
 import { requireUser } from '@/lib/auth'
 import { productRank, rankOf } from '@/lib/catalog'
 import { ALL_COUNTRY_CODES, countryCode, countryNamePt } from '@/lib/countries'
-import { catalogPricedProducts, CIF_SETTING, loadPriceBands, loadPriceTwins } from '@/lib/exportPricing'
+import { catalogPricedProducts, loadPriceBands, loadPriceTwins } from '@/lib/exportPricing'
 import { issuedQuotesView } from '@/lib/loadPricing'
 import { priceListItems } from '@/lib/priceList'
 import { can } from '@/lib/roles'
@@ -30,7 +30,7 @@ export default async function PrecosExportacaoPage() {
         <p className="muted">Disponível só para usuários da área de Exportação.</p>
       </div>
     )
-  const [categories, countries, families, rules, prices, history, users, shipments, products, rank, brandAdj, agents, commissions, quotes, settings, listItems, twins, bands, bandRows, bandPriceRows] = await Promise.all([
+  const [categories, countries, families, rules, prices, history, users, shipments, products, rank, brandAdj, agents, commissions, quotes, listItems, twins, bands, bandRows, bandPriceRows] = await Promise.all([
     db.select().from(schema.priceCategories).orderBy(asc(schema.priceCategories.sort), asc(schema.priceCategories.code)),
     db.select().from(schema.countryPriceCategories),
     db.select().from(schema.productFamilies).where(eq(schema.productFamilies.active, true)).orderBy(asc(schema.productFamilies.sort), asc(schema.productFamilies.name)),
@@ -45,7 +45,6 @@ export default async function PrecosExportacaoPage() {
     db.select().from(schema.agents).orderBy(asc(schema.agents.name)),
     db.select().from(schema.commissionRates),
     issuedQuotesView({ limit: 1000 }),
-    db.select().from(schema.exportPriceSettings),
     priceListItems(),
     loadPriceTwins(),
     loadPriceBands(),
@@ -99,7 +98,6 @@ export default async function PrecosExportacaoPage() {
       listItems={listItems}
       priceTwin={[...twins]}
       skuDiameterFt={[...(bands.skuDiameterFt ?? [])]}
-      cifDefault={settings.find((x) => x.key === CIF_SETTING)?.value ?? null}
       agents={agents.map((a) => ({ id: a.id, name: a.name, active: a.active }))}
       commissions={commissions.map((c) => ({ agentId: c.agentId, familyId: c.familyId, pct: c.pct, updated: `${dtSec(c.updatedAt)}${c.updatedBy ? ` · ${uname.get(c.updatedBy) ?? ''}` : ''}` }))}
       history={history.map((h) => ({
