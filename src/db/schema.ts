@@ -647,6 +647,26 @@ export const familyPriceBands = pgTable(
   (t) => [unique('family_price_band_unique').on(t.familyId, t.key)],
 )
 
+/**
+ * Perímetro REAL de fabricação por diâmetro (silo-bolsa; Matías, 14/10/2026): o peso líquido de todo silo-bolsa
+ * desse diâmetro = perímetro real × comprimento × espessura × 0,932 (domain/siloPerimeter). Diâmetro sem linha
+ * aqui → vale o peso da planilha da fábrica.
+ */
+export const familyPerimeters = pgTable(
+  'family_perimeter',
+  {
+    id: serial('id').primaryKey(),
+    familyId: integer('family_id')
+      .notNull()
+      .references(() => productFamilies.id),
+    diameterFt: numeric('diameter_ft', { precision: 6, scale: 2, mode: 'number' }).notNull(),
+    perimeterM: numeric('perimeter_m', { precision: 8, scale: 3, mode: 'number' }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: integer('updated_by'),
+  },
+  (t) => [unique('family_perimeter_unique').on(t.familyId, t.diameterFt), check('family_perimeter_positive', sql`${t.perimeterM} > 0`)],
+)
+
 /** USD/kg líquido de cada faixa de diâmetro numa categoria */
 export const familyBandPrices = pgTable(
   'family_band_price',

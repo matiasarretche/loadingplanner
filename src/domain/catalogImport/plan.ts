@@ -8,6 +8,7 @@
  */
 import { REFERENCE_PALLET_MAX_HEIGHT_MM } from '@/domain/logisticsRules'
 import { isRuleLona, lonaWidthM } from '@/domain/lonaRule'
+import { perimeterFor, type SiloPerimeter } from '@/domain/siloPerimeter'
 import { applyCodeOverride, assignBox, type BoxAssignment } from './assignBox'
 import { boxDimsText, buildBoxModels } from './boxSheet'
 import { classifyRow, type OfficialProduct } from './classify'
@@ -40,6 +41,7 @@ const isWaterTank = (p: OfficialProduct) => p.family === 'HIDROSILO' || p.family
 const numAttr = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) ? Number(v) : null)
 const dimsKey = (l: number, w: number, h: number) => `${Math.max(l, w)}x${Math.min(l, w)}x${h}`
 /** lista curta de códigos para mensagens */
+const kgText = (x: number) => String(round(x, 3)).replace('.', ',')
 const codeList = (codes: string[], max = 12) => (codes.length > max ? `${codes.slice(0, max).join(', ')}… (+${codes.length - max})` : codes.join(', '))
 
 /** Capacidade do reservatório: da medida; senão do equivalente atual; senão única entre as linhas oficiais da mesma medida. */
@@ -61,7 +63,7 @@ function fillCapacity(p: OfficialProduct, cur: CurrentVariant | null, waterTanks
   }
 }
 
-function buildAttrs(p: OfficialProduct, cur: CurrentVariant | null, exact: boolean, a: BoxAssignment, d: ImportDecisions): Record<string, string | number | null> {
+function buildAttrs(p: OfficialProduct, cur: CurrentVariant | null, exact: boolean, a: BoxAssignment, d: ImportDecisions, siloPerimeters: readonly SiloPerimeter[]): Record<string, string | number | null> {
   const at: Record<string, string | number | null> = {
     tipo: p.kind,
     linha: p.lineKey,
@@ -74,7 +76,9 @@ function buildAttrs(p: OfficialProduct, cur: CurrentVariant | null, exact: boole
   const ca = cur?.attrs ?? {}
   if (p.family === 'SILO_BAG' && p.diameterFt) {
     at.diametro_m = numAttr(ca.diametro_m) ?? round(p.diameterFt * FT_M, 3)
-    at.perimetro_m = numAttr(ca.perimetro_m) ?? round(Math.PI * p.diameterFt * FT_M, 3)
+    // perímetro real cadastrado na família (o do peso calculado) vale sobre o atual e o π × D — como no recálculo
+    // e na edição manual (src/lib/siloPerimeters.ts), mesmo sem recalcular o peso (pendente, várias por caixa)
+    at.perimetro_m = perimeterFor(siloPerimeters, p.diameterFt) ?? numAttr(ca.perimetro_m) ?? round(Math.PI * p.diameterFt * FT_M, 3)
     const t = numAttr(ca.capacidade_t)
     if (t != null) at.capacidade_t = t
   }
@@ -112,26 +116,38 @@ export function buildImportPlan(input: BuildPlanInput): ImportPlan {
   warnings.push(...boxWarnings)
 
   // ---------------------------------------------------------------- produtos: ler e classificar
+  // perímetros reais da família Silo-bolsa (Catálogo → "Editar família"): o líquido gravado é o calculado
+  const siloPerimeters: SiloPerimeter[] = (current.realPerimeters ?? []).filter((r) => r.familyCode === d.families.SILO_BAG.code).map((r) => ({ diameterFt: r.diameterFt, perimeterM: r.perimeterM }))
   const parsed: OfficialProduct[] = []
   const skipped: { row: number; code: string | null; reason: string }[] = []
   for (const raw of input.products) {
-    const r = classifyRow(raw, d)
+    const r = classifyRow(raw, d, undefined, siloPerimeters)
     if (r.ok) parsed.push(r.product)
     else skipped.push({ row: raw.row, code: raw.code == null ? null : String(raw.code), reason: r.reason })
   }
   const sheetParsed = parsed.length
   // produtos fora da planilha (decisão): o mesmo motor lê, nomeia e põe caixa; o SKU dado é o código
+  const extrasEstimated: string[] = []
+  const extraSkus = new Set(d.extraProducts.map((x) => x.sku))
   for (const x of d.extraProducts) {
-    const r = classifyRow({ row: 0, code: null, group: x.group, measure: x.measure, thickness: x.thickness, brand: x.brand, netKg: x.netKg, grossKg: null, ean: null }, d, x.sku)
+    const r = classifyRow({ row: 0, code: null, group: x.group, measure: x.measure, thickness: x.thickness, brand: x.brand, netKg: x.netKg, grossKg: null, ean: null }, d, x.sku, siloPerimeters)
     if (!r.ok) {
       warnings.push({ level: 'BLOCKER', code: 'EXTRA_PRODUCT_UNPARSED', message: `Produto fora da planilha ${x.sku} ("${x.group} ${x.measure} ${x.thickness}") não foi entendido: ${r.reason}.`, codes: [x.sku] })
       continue
     }
-    r.product.issues.push(x.note)
-    parsed.push(r.product)
+    // com perímetro real o peso deixa de ser estimado: vale o calculado (o estimado só escolhe a caixa e o bruto)
+    const xp = r.product
+    if (xp.calcNetKg != null) xp.issues.push(`${x.origin ?? 'fora da planilha oficial'}: peso líquido calculado pelo perímetro real ${xp.calcNetFormula} = ${kgText(xp.calcNetKg)} kg (no lugar da estimativa de ${kgText(x.netKg)} kg)`)
+    else {
+      xp.issues.push(x.note)
+      extrasEstimated.push(x.sku)
+    }
+    parsed.push(xp)
   }
-  if (d.extraProducts.length)
-    warnings.push({ level: 'INFO', code: 'EXTRA_PRODUCTS', message: `${d.extraProducts.length} produto(s) fora da planilha entram por decisão (peso estimado — confirmar): ${d.extraProducts.map((x) => x.sku).join(', ')}.`, codes: d.extraProducts.map((x) => x.sku) })
+  if (d.extraProducts.length) {
+    const how = !extrasEstimated.length ? 'peso líquido pelo perímetro real' : extrasEstimated.length === d.extraProducts.length ? 'peso estimado — confirmar' : `peso estimado — confirmar — em ${extrasEstimated.join(', ')}; os outros pelo perímetro real`
+    warnings.push({ level: 'INFO', code: 'EXTRA_PRODUCTS', message: `${d.extraProducts.length} produto(s) fora da planilha entram por decisão (${how}): ${d.extraProducts.map((x) => x.sku).join(', ')}.`, codes: d.extraProducts.map((x) => x.sku) })
+  }
   if (skipped.length)
     warnings.push({
       level: 'WARN',
@@ -175,13 +191,23 @@ export function buildImportPlan(input: BuildPlanInput): ImportPlan {
     if (a.status === 'ASSIGNED') {
       const dims = a.source === 'SHEET' ? { l: a.box.lengthMm, w: a.box.widthMm, h: a.box.heightMm } : { l: Math.max(a.pack.lengthMm, a.pack.widthMm), w: Math.min(a.pack.lengthMm, a.pack.widthMm), h: a.pack.heightMm }
       const tare = a.source === 'SHEET' ? a.box.tareKg : round(Math.max(0, a.pack.grossKg - a.pack.netKg), 3)
-      const wgt = plannedWeights(p, tare, d)
+      // silo-bolsa com perímetro real: grava o líquido calculado (a regra do bruto e a tara seguem a planilha)
+      const wgt = plannedWeights(p, tare, d, p.calcNetKg)
+      const byPerimeter = p.calcNetKg != null
       const pal = plannedPallet(a, cur, d, current.palletTypes)
       if (pal.palletTypeCode) usedPallets.add(pal.palletTypeCode)
       if (pal.catalogPalletReplaced) palletReplaced.push(p.code)
       if (pal.tooTall) palletTooTall.push(p.code)
       const pk = cur?.pack ?? null
-      const verified = !!pk && pk.verification === 'VERIFIED' && dimsKey(pk.lengthMm, pk.widthMm, pk.heightMm) === dimsKey(dims.l, dims.w, dims.h) && pk.netKg > 0 && Math.abs(wgt.netKg - pk.netKg) / pk.netKg <= 0.02
+      // verificada continua verificada com a mesma caixa e o líquido atual a até 2% do gravado. Pelo perímetro real
+      // também vale o líquido da planilha (embalagem ainda não recalculada: a diferença vem só da fórmula) — o mesmo
+      // resultado de recalcular antes na tela Catálogo (que copia a verificação), em qualquer ordem
+      const closeToCurrent = (net: number) => !!pk && pk.netKg > 0 && Math.abs(net - pk.netKg) / pk.netKg <= 0.02
+      const verified =
+        !!pk &&
+        pk.verification === 'VERIFIED' &&
+        dimsKey(pk.lengthMm, pk.widthMm, pk.heightMm) === dimsKey(dims.l, dims.w, dims.h) &&
+        (closeToCurrent(wgt.netKg) || (byPerimeter && closeToCurrent(round(p.netKg ?? 0, 3))))
       packaging = {
         boxCode: a.source === 'SHEET' ? a.box.code : null,
         boxSheetRow: a.source === 'SHEET' ? a.box.sheetRow : null,
@@ -204,7 +230,9 @@ export function buildImportPlan(input: BuildPlanInput): ImportPlan {
         verification: verified ? 'VERIFIED' : 'ESTIMATED',
         confidence: a.confidence,
         reason: a.reason,
-        notes: [...a.notes, ...(a.source === 'SHEET' && a.box.tareNote ? [a.box.tareNote] : [])],
+        notes: [...a.notes, ...(a.source === 'SHEET' && a.box.tareNote ? [a.box.tareNote] : []), ...(byPerimeter ? [`líquido pelo perímetro real ${p.calcNetFormula} = ${kgText(wgt.netKg)} kg (${extraSkus.has(p.code) ? 'estimativa' : 'planilha'} ${kgText(p.netKg ?? 0)} kg)`] : [])],
+        netSource: byPerimeter ? 'REAL_PERIMETER' : 'SHEET',
+        ...(byPerimeter ? { sheetNetKg: round(p.netKg ?? 0, 3), realPerimeterM: p.realPerimeterM! } : {}),
       }
     }
     const name = productName(p, d)
@@ -241,10 +269,11 @@ export function buildImportPlan(input: BuildPlanInput): ImportPlan {
       ean: p.ean,
       eanStatus: p.eanStatus,
       eanNote: p.eanNote,
-      attrs: buildAttrs(p, cur, exact, a, d),
+      attrs: buildAttrs(p, cur, exact, a, d, siloPerimeters),
       notes: problems.length ? `Catálogo oficial (planilha, linha ${p.row}): ${problems.join('; ')}` : null,
       match: m.match,
       packaging,
+      calcNetKg: p.calcNetKg,
       dataIssues: [...problems, ...p.notes],
       source: { group: p.group, measure: p.measure, thickness: p.thicknessText, brand: p.brandRaw, netKg: p.netKg, grossKg: p.grossKg },
     })
@@ -343,6 +372,20 @@ export function buildImportPlan(input: BuildPlanInput): ImportPlan {
     })
   const grossReplaced = products.filter((x) => x.packaging?.grossSource === 'NET_PLUS_BOX_TARE')
   if (grossReplaced.length) warnings.push({ level: 'INFO', code: 'GROSS_REPLACED', message: `${grossReplaced.length} produto(s) com bruto oficial inutilizável: bruto = líquido + tara da caixa. ${codeList(grossReplaced.map((x) => x.code))}.`, codes: grossReplaced.map((x) => x.code) })
+  // silo-bolsas com o líquido pelo perímetro real (decisão de 14/10/2026): quantos e quais mudam mais de 2%
+  const byPerimeter = products.filter((x) => x.packaging?.netSource === 'REAL_PERIMETER')
+  const calcAll = products.filter((x) => x.calcNetKg != null)
+  if (calcAll.length) {
+    const far = calcAll.filter((x) => x.source.netKg != null && x.source.netKg > 0 && Math.abs(x.calcNetKg! - x.source.netKg) / x.source.netKg > 0.02)
+    const table = siloPerimeters.map((r) => `${String(r.diameterFt).replace('.', ',')} pés = ${r.perimeterM.toFixed(2).replace('.', ',')} m`).join('; ')
+    const pendingCalc = calcAll.length - byPerimeter.length
+    warnings.push({
+      level: 'INFO',
+      code: 'NET_FROM_REAL_PERIMETER',
+      message: `${byPerimeter.length} silo-bolsa(s) gravam o peso líquido pelo perímetro real (${table}) × comprimento × espessura × 0,932 g/cm³, no lugar do peso da planilha; o bruto soma a mesma tara${pendingCalc ? ` (+ ${pendingCalc} pendente(s) sem caixa)` : ''}. ${far.length ? `${far.length} diferem mais de 2% da planilha: ${codeList(far.map((x) => `${x.code} (${kgText(x.source.netKg!)} → ${kgText(x.calcNetKg!)} kg)`))}.` : 'Nenhum difere mais de 2% da planilha.'}`,
+      ...(far.length ? { codes: far.map((x) => x.code) } : {}),
+    })
+  }
   const anomalies = dd.kept.filter((p) => p.netVsTheory != null && (p.netVsTheory < 0.85 || p.netVsTheory > 1.2))
   if (anomalies.length) warnings.push({ level: 'INFO', code: 'WEIGHT_ANOMALY', message: `${anomalies.length} produto(s) com peso líquido fora de 85–120% do teórico pela medida e espessura: ${codeList(anomalies.map((p) => p.code))}.`, codes: anomalies.map((p) => p.code) })
   for (const rule of d.companionRules) {

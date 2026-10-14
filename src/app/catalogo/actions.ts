@@ -7,11 +7,13 @@ import { db, schema as s } from '@/db'
 import { eanStatusOf } from '@/domain/catalogImport/ean'
 import { isOrientation } from '@/domain/geometry'
 import { todayBR } from '@/domain/exportTracking'
+import { calcLengthM, diameterKey, perimeterFor, roundPerimeterM, siloBagFormulaText, siloBagNetKg } from '@/domain/siloPerimeter'
 import { parseTechOption } from '@/domain/technology'
 import { assertUser } from '@/lib/auth'
 import { diffRecords, logAudit } from '@/lib/audit'
 import { isUniqueViolation } from '@/lib/dbErrors'
 import { syncCompositionsWithCatalog } from '@/lib/refreshCompositions'
+import { applySiloBagPerimeters, isSiloBagFamily, lockedFamilyPerimeters, perimeterRowError, SiloPerimeterError, type PerimeterRecalcResult, type PerimeterRowInput } from '@/lib/siloPerimeters'
 
 export interface ActionResult {
   ok?: boolean
@@ -59,6 +61,7 @@ export interface CatalogItemInput {
 
 const int = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN)
 const dec = (v: string) => (/^\d+([.,]\d+)?$/.test(v.trim()) ? Number(v.trim().replace(',', '.')) : NaN)
+const r3 = (x: number) => Math.round(x * 1000) / 1000
 
 function revalidate() {
   revalidatePath('/catalogo')
@@ -167,6 +170,33 @@ export async function saveCatalogItemAction(input: CatalogItemInput): Promise<Ac
   try {
     // tudo ou nada: produto, SKU e embalagem numa transação (um erro no meio não deixa registro órfão)
     const fail = await db.transaction(async (tx) => {
+      // silo-bolsa: perímetro real do diâmetro, lido ANTES de gravar o produto (espera um recálculo da família ou uma
+      // importação do catálogo em andamento). As três rotas travam na mesma ordem — perímetros → produtos →
+      // embalagens; a importação também trava family_perimeter PRIMEIRO — então não há impasse entre elas.
+      // Com perímetro real e medidas completas, o peso líquido é o calculado (o digitado é ignorado) e o
+      // c/ embalagem = calculado + a tara digitada (c/ embalagem − líquido). Líquido não informado (0): a tara é
+      // desconhecida — fica o c/ embalagem digitado (não pode ser menor que o líquido calculado)
+      const realPerimeterM = isSiloBagFamily(fam) && diameterFt != null ? perimeterFor(await lockedFamilyPerimeters(tx, familyId), diameterFt) : null
+      const siloLengthM = calcLengthM({ lengthM, lengthFt })
+      const siloCalc = realPerimeterM != null && pack?.unitsPerPackage === 1 ? siloBagNetKg({ perimeterM: realPerimeterM, lengthM: siloLengthM, thicknessUm }) : null
+      const packToSave =
+        pack && siloCalc != null ? { ...pack, netKg: siloCalc, grossKg: pack.netKg > 0 ? r3(siloCalc + (pack.grossKg - pack.netKg)) : pack.grossKg } : pack
+      if (packToSave && siloCalc != null && packToSave.grossKg < siloCalc)
+        return { error: 'Corrija os campos destacados.', fieldErrors: { grossKg: 'O peso com embalagem não pode ser menor que o líquido calculado' } } as ActionResult
+      // auditoria: registra a fórmula e o que foi digitado × gravado
+      const siloAudit =
+        pack && packToSave && siloCalc != null
+          ? {
+              pesoPeloPerimetro: {
+                formula: siloBagFormulaText({ perimeterM: realPerimeterM!, lengthM: siloLengthM!, thicknessUm: thicknessUm! }),
+                digitado: { liquido: pack.netKg, bruto: pack.grossKg },
+                gravado: { liquido: packToSave.netKg, bruto: packToSave.grossKg },
+              },
+            }
+          : {}
+      // ficha do produto: com perímetro real, attrs.perimetro_m mostra o da tabela da família
+      const withRealPerimeter = (attrs: Record<string, string | number | null>) => (realPerimeterM != null ? { ...attrs, perimetro_m: realPerimeterM } : attrs)
+
       // linha/produto: encontra ou cria dentro da família
       let product = await tx.query.products.findFirst({ where: and(eq(s.products.familyId, familyId), eq(s.products.name, lineName)) })
       if (!product) [product] = await tx.insert(s.products).values({ familyId, name: lineName, createdBy: me.id, updatedBy: me.id }).returning()
@@ -175,7 +205,7 @@ export async function saveCatalogItemAction(input: CatalogItemInput): Promise<Ac
       const brand = (input.brand ?? '').trim() || 'Pacifil'
       const vData = { productId: product.id, sku, name, brand, thicknessUm, diameterFt, widthM, lengthM, lengthFt, ean, eanStatus, notes: input.notes.trim() || null, active: true, price, priceCurrency, priceUnit }
       if (variantId == null) {
-        const attrs = withBoxCode({})
+        const attrs = withRealPerimeter(withBoxCode({}))
         const [v] = await tx.insert(s.productVariants).values({ ...vData, attrs, ...(price !== null ? { priceUpdatedAt: new Date() } : {}), createdBy: me.id, updatedBy: me.id }).returning()
         variantId = v.id
         await logAudit('product_variant', v.id, 'create', me.id, { ...vData, attrs })
@@ -183,8 +213,8 @@ export async function saveCatalogItemAction(input: CatalogItemInput): Promise<Ac
         const before = await tx.query.productVariants.findFirst({ where: eq(s.productVariants.id, variantId) })
         if (!before) return { error: 'Produto não encontrado.' } as ActionResult
         const priceChanged = before.price !== price || before.priceCurrency !== priceCurrency || before.priceUnit !== priceUnit
-        // atributos: só o código da caixa muda aqui; os demais (técnicos, da importação) ficam como estão
-        const attrs = withBoxCode(before.attrs)
+        // atributos: só o código da caixa (e o perímetro real do silo-bolsa) muda aqui; os demais (técnicos, da importação) ficam como estão
+        const attrs = withRealPerimeter(withBoxCode(before.attrs))
         await tx
           .update(s.productVariants)
           .set({ ...vData, attrs, ...(priceChanged ? { priceUpdatedAt: new Date() } : {}), updatedBy: me.id, updatedAt: new Date() })
@@ -192,25 +222,26 @@ export async function saveCatalogItemAction(input: CatalogItemInput): Promise<Ac
         await logAudit('product_variant', variantId, 'update', me.id, diffRecords(before, { ...vData, attrs }))
       }
   
-      if (pack) {
+      if (packToSave) {
         const [cur] = await tx.select().from(s.packagingVersions).where(eq(s.packagingVersions.variantId, variantId)).orderBy(desc(s.packagingVersions.version)).limit(1)
         // dia de hoje em São Paulo (o servidor roda em UTC: depois das 21 h já seria amanhã)
         const today = todayBR()
         if (!cur) {
-          await tx.insert(s.packagingVersions).values({ ...pack, variantId, version: 1, validFrom: today, createdBy: me.id, updatedBy: me.id })
+          const [pv] = await tx.insert(s.packagingVersions).values({ ...packToSave, variantId, version: 1, validFrom: today, createdBy: me.id, updatedBy: me.id }).returning({ id: s.packagingVersions.id })
+          if (siloCalc != null) await logAudit('packaging_version', pv.id, 'create', me.id, siloAudit)
         } else {
-          const changes = diffRecords(cur as unknown as Record<string, unknown>, pack)
+          const changes = diffRecords(cur as unknown as Record<string, unknown>, packToSave)
           if (Object.keys(changes).length) {
             if (cur.locked) {
               // versão já usada em carga salva: preserva o histórico criando v(n+1)
               await tx.update(s.packagingVersions).set({ validTo: today }).where(and(eq(s.packagingVersions.id, cur.id), isNull(s.packagingVersions.validTo)))
               const copy: Partial<typeof cur> = { ...cur }
               for (const k of ['id', 'createdAt', 'updatedAt', 'locked', 'validFrom', 'validTo'] as const) delete copy[k]
-              await tx.insert(s.packagingVersions).values({ ...(copy as typeof s.packagingVersions.$inferInsert), ...pack, variantId, version: cur.version + 1, validFrom: today, validTo: null, locked: false, createdBy: me.id, updatedBy: me.id })
-              await logAudit('packaging_version', cur.id, 'new_version', me.id, changes)
+              await tx.insert(s.packagingVersions).values({ ...(copy as typeof s.packagingVersions.$inferInsert), ...packToSave, variantId, version: cur.version + 1, validFrom: today, validTo: null, locked: false, createdBy: me.id, updatedBy: me.id })
+              await logAudit('packaging_version', cur.id, 'new_version', me.id, { ...changes, ...siloAudit })
             } else {
-              await tx.update(s.packagingVersions).set({ ...pack, updatedBy: me.id, updatedAt: new Date() }).where(eq(s.packagingVersions.id, cur.id))
-              await logAudit('packaging_version', cur.id, 'update', me.id, changes)
+              await tx.update(s.packagingVersions).set({ ...packToSave, updatedBy: me.id, updatedAt: new Date() }).where(eq(s.packagingVersions.id, cur.id))
+              await logAudit('packaging_version', cur.id, 'update', me.id, { ...changes, ...siloAudit })
             }
           }
         }
@@ -293,4 +324,63 @@ export async function deleteFamilyAction(id: number): Promise<ActionResult> {
   await logAudit('product_family', id, 'delete', me.id)
   revalidate()
   return { ok: true }
+}
+
+/**
+ * Perímetro REAL do silo-bolsa por diâmetro (Catálogo → Silo-bolsa → "Editar família"; Matías, 14/10/2026).
+ * `rows` = a tabela INTEIRA da família (a linha que não vier é apagada; perímetro vazio = linha removida).
+ * Grava a tabela e recalcula o peso de todos os silo-bolsas ativos desses diâmetros (src/lib/siloPerimeters.ts);
+ * `dryRun` = só a prévia (nada é gravado). Erros por linha em fieldErrors["perimeter:<diâmetro como veio>"].
+ */
+export async function saveSiloPerimetersAction(
+  familyId: number,
+  rows: { diameterFt: string; perimeterM: string }[],
+  dryRun?: boolean,
+): Promise<ActionResult & { result?: PerimeterRecalcResult }> {
+  const me = await assertUser('editCatalog')
+  if (!Number.isInteger(familyId) || familyId <= 0) return { error: 'Família não encontrada.' }
+  const fe: Record<string, string> = {}
+  const parsed: PerimeterRowInput[] = []
+  const seen = new Set<string>()
+  for (const r of rows) {
+    const dRaw = (r.diameterFt ?? '').trim()
+    const pRaw = (r.perimeterM ?? '').trim()
+    // perímetro vazio = linha removida: os pesos atuais ficam; a próxima importação grava o peso da planilha para esse diâmetro
+    if (pRaw === '') continue
+    const key = `perimeter:${r.diameterFt ?? ''}`
+    const d = dec(dRaw)
+    // validado já com as 3 casas que o banco grava — a mesma validação da tela (src/domain/siloPerimeter.ts)
+    const p = roundPerimeterM(dec(pRaw))
+    if (!(d > 0)) {
+      fe[key] = 'Informe o diâmetro em pés (ex.: 9 ou 11,5)'
+      continue
+    }
+    const err = Number.isNaN(p) ? 'Número em metros (ex.: 8,70)' : perimeterRowError(d, p)
+    if (err) {
+      fe[key] = err
+      continue
+    }
+    if (seen.has(diameterKey(d))) {
+      fe[key] = 'Diâmetro repetido'
+      continue
+    }
+    seen.add(diameterKey(d))
+    parsed.push({ diameterFt: d, perimeterM: p })
+  }
+  if (Object.keys(fe).length) return { error: 'Corrija os perímetros destacados.', fieldErrors: fe }
+
+  let result: PerimeterRecalcResult
+  try {
+    result = await applySiloBagPerimeters({ familyId, rows: parsed, userId: me.id, dryRun: Boolean(dryRun) })
+  } catch (e) {
+    if (e instanceof SiloPerimeterError) return { error: e.message }
+    throw e
+  }
+  if (!result.dryRun) {
+    // montagens de palete e paletes padrão (REF) usam o peso novo — atualizados depois da resposta
+    if (result.changed.length) after(() => syncCompositionsWithCatalog(me.id))
+    revalidate()
+    revalidatePath('/admin/manutencao')
+  }
+  return { ok: true, result }
 }

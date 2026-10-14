@@ -281,6 +281,13 @@
       "when": 1791920374213,
       "tag": "0039_catalog_import",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792004902999,
+      "tag": "0040_silo_bag_perimeter",
+      "breakpoints": true
     }
   ]
 }

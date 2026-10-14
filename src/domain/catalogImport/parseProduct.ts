@@ -2,11 +2,12 @@
  * Leitura dos textos da planilha de produtos: espessura (coluna D) e medidas (coluna C).
  * Porta de scratchpad/catalog-analysis/scripts/normalize.js (validado nas 667 linhas da planilha).
  */
+import { PE_DENSITY_KG_M3 } from '@/domain/siloPerimeter'
 
 export const FT_M = 0.3048
 export const MIL_UM = 25.4
-/** densidade do filme de PE (kg/m³) — só para conferir pesos */
-export const PE_DENSITY = 930
+/** densidade do filme de PE (kg/m³): 0,932 g/cm³, a mesma de todos os produtos Pacifil (domain/siloPerimeter) */
+export const PE_DENSITY = PE_DENSITY_KG_M3
 
 export const round = (x: number, d = 3) => Math.round(x * 10 ** d) / 10 ** d
 const dec = (s: string) => parseFloat(s.replace(',', '.'))

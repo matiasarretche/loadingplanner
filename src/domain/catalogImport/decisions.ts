@@ -66,9 +66,12 @@ export interface ExtraProduct {
   measure: string
   thickness: string
   brand: string
+  /** peso líquido estimado: escolhe a caixa e a tara; com perímetro real cadastrado o gravado é o calculado */
   netKg: number
-  /** origem do peso / do pedido: vai para as observações do cadastro */
+  /** origem do peso / do pedido: vai para as observações do cadastro (sem perímetro real) */
   note: string
+  /** origem do pedido, sem o peso: começo da observação quando o peso vem do perímetro real */
+  origin?: string
 }
 
 export interface ImportDecisions {
@@ -77,6 +80,13 @@ export interface ImportDecisions {
   brandMap: Record<string, string>
   /** SKUs atuais que continuam ativos mesmo fora da planilha */
   keepActiveSkus: string[]
+  /**
+   * siglas de ESPESSURA da fábrica no silo-bolsa ("BPT 9PESX60M"): só repetem a espessura, que já está na medida —
+   * ficam fora do nome e da comparação de repetidos (o mesmo silo-bolsa com e sem a sigla = repetido)
+   */
+  siloBagThicknessCodes: string[]
+  /** a mesma informação escrita na espessura ("220 MICRAS / MEDIA") */
+  siloBagThicknessTags: string[]
   /** produtos que não estão na planilha e entram na importação (o SKU dado é o código) */
   extraProducts: ExtraProduct[]
   /** acompanhantes obrigatórios por família (atributos acessorio_sku / acessorio_qtd) */
@@ -134,16 +144,21 @@ const BIG: BoxLine[] = ['BIGSAFE']
 const BIGSILO: BoxLine[] = ['BIGSILO']
 
 export const DEFAULT_DECISIONS: ImportDecisions = {
-  id: '2026-10-14-matias',
+  id: '2026-10-14b-matias',
   brandMap: { PACIFIL: 'Pacifil', ECOBAG: 'Ecobag', PROBAG: 'Probag', FITA: 'Pacifil', 'EXT. B': 'Pacifil' },
   // 14/10/2026 (lista de silo-bolsas Venezuela / representante Flavinho): os 6 pés × 75 e × 100 m × 180 µm não estão
   // na planilha — continuam ativos com o peso e a caixa atuais até o Matías passar o código da fábrica
   keepActiveSkus: ['KIT-HF', 'SB-PAC-6X75-180', 'SB-PAC-6X100-180'],
+  // 14/10/2026 (Matías): BPT e BBT = bolsa tradicional (a mais grossa da medida), BPM = média; sem sigla = fina.
+  // Como a espessura já está na medida, a sigla sai do nome e o mesmo silo-bolsa com e sem ela é repetido (decisão 10)
+  siloBagThicknessCodes: ['BPT', 'BBT', 'BPM'],
+  siloBagThicknessTags: ['MEDIA'],
   // 14/10/2026 (mesma lista): 10 pés × 100 m e × 60 m × 235 µm não existem na planilha. Peso líquido ESTIMADO a
-  // 2,132 kg/m, o mesmo do 19528 (10 × 75 m × 235 µm = 159,9 kg) e do 19530 (10 × 90 m × 235 µm = 191,9 kg)
+  // 2,132 kg/m, o mesmo do 19528 (10 × 75 m × 235 µm = 159,9 kg) e do 19530 (10 × 90 m × 235 µm = 191,9 kg).
+  // Com o perímetro real do 10 pés cadastrado (9,65 m), o peso gravado é o calculado (211,35 / 126,81 kg)
   extraProducts: [
-    { sku: 'SB-PAC-10X100-235', group: 'SILO PLAS/RESERV SBG', measure: '10PESX100M', thickness: '235MIC', brand: 'PACIFIL', netKg: 213.2, note: 'fora da planilha oficial (pedido do Matías, 14/10/2026): peso líquido ESTIMADO 213,2 kg = 2,132 kg/m (19528 / 19530) — confirmar o peso real' },
-    { sku: 'SB-PAC-10X60-235', group: 'SILO PLAS/RESERV SBG', measure: '10PESX60M', thickness: '235MIC', brand: 'PACIFIL', netKg: 127.9, note: 'fora da planilha oficial (pedido do Matías, 14/10/2026): peso líquido ESTIMADO 127,9 kg = 2,132 kg/m (19528 / 19530) — confirmar o peso real' },
+    { sku: 'SB-PAC-10X100-235', group: 'SILO PLAS/RESERV SBG', measure: '10PESX100M', thickness: '235MIC', brand: 'PACIFIL', netKg: 213.2, origin: 'fora da planilha oficial (pedido do Matías, 14/10/2026)', note: 'fora da planilha oficial (pedido do Matías, 14/10/2026): peso líquido ESTIMADO 213,2 kg = 2,132 kg/m (19528 / 19530) — confirmar o peso real' },
+    { sku: 'SB-PAC-10X60-235', group: 'SILO PLAS/RESERV SBG', measure: '10PESX60M', thickness: '235MIC', brand: 'PACIFIL', netKg: 127.9, origin: 'fora da planilha oficial (pedido do Matías, 14/10/2026)', note: 'fora da planilha oficial (pedido do Matías, 14/10/2026): peso líquido ESTIMADO 127,9 kg = 2,132 kg/m (19528 / 19530) — confirmar o peso real' },
   ],
   companionRules: [{ family: 'HYDROFORCE', sku: 'KIT-HF', qty: 1 }],
   families: {

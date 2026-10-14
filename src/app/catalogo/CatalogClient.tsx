@@ -12,7 +12,9 @@ import { DEFAULT_ORIENTATIONS, ORIENTATION_POLICIES, POLICY_LABEL, policyOf } fr
 import { productKind, requiredFields, TechField } from '@/domain/productOrder'
 import { TechCells, TechHeaders } from '@/components/TechCells'
 import { FamilyTech, TECH_OPTIONS, TECHNOLOGIES, parseTechOption, techBadge, techOptionValue } from '@/domain/technology'
+import { calcLengthM, isCalculatedNet, packRecalcBlocker, perimeterFor, siloBagFormulaText, siloBagNetKg, type SiloPerimeter } from '@/domain/siloPerimeter'
 import { CatalogItemInput, deleteCatalogItemAction, deleteFamilyAction, saveCatalogItemAction, saveFamilyAction } from './actions'
+import { PerimeterEditor } from './PerimeterEditor'
 
 export interface CatalogFamily {
   id: number
@@ -21,6 +23,8 @@ export interface CatalogFamily {
   /** tecnologia comercial nos PDFs (PACIFIL NXT: menção ou selo); null = nenhuma */
   tech: FamilyTech | null
   lines: string[]
+  /** perímetro real por diâmetro — só na família Silo-bolsa (vazio = nenhum definido; ausente = não se aplica) */
+  perimeters?: SiloPerimeter[]
 }
 
 type FamilyForm = { id: number | null; name: string; code: string; tech: string }
@@ -50,6 +54,10 @@ export interface CatalogRow {
   widthM: number | null
   lengthM: number | null
   lengthFt: number | null
+  /** silo-bolsa: perímetro real do diâmetro (m); null = não definido (vale o peso da planilha) */
+  perimeterM: number | null
+  /** silo-bolsa: peso líquido pelo perímetro real (kg, 2 casas); null = sem perímetro ou falta comprimento/espessura */
+  calcNetKg: number | null
   /** campos que a família exige (vazios → vermelho) */
   required: TechField[]
   notes: string
@@ -85,6 +93,52 @@ interface Props {
 }
 
 const dec = (v: number | null | undefined) => (v == null ? '' : String(v).replace('.', ','))
+/** número digitado (vírgula ou ponto); vazio ou inválido → null */
+const numOf = (s: string) => (/^\d+([.,]\d+)?$/.test(s.trim()) ? Number(s.trim().replace(',', '.')) : null)
+/** kg com as 3 casas do banco (116,763): mostra a diferença que separa o cadastrado do calculado */
+const kg3 = (x: number) => `${x.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} kg`
+
+/**
+ * peso líquido do silo-bolsa pelo perímetro real com as medidas digitadas (a mesma regra do servidor ao salvar:
+ * só com 1 unidade por caixa); null = o diâmetro não tem perímetro real. netKg null → `note` diz o que falta.
+ */
+function siloCalc(v: CatalogItemInput, fam: CatalogFamily | undefined): { netKg: number; formula: string } | { netKg: null; note: string } | null {
+  const perimeterM = fam?.perimeters ? perimeterFor(fam.perimeters, numOf(v.diameterFt)) : null
+  if (perimeterM == null) return null
+  const upk = v.unitsPerPackage.trim() === '' ? 1 : numOf(v.unitsPerPackage)
+  if (upk !== 1) return { netKg: null, note: 'Diâmetro com perímetro real, mas a caixa leva mais de 1 unidade: o peso líquido não é calculado' }
+  const lengthM = calcLengthM({ lengthM: numOf(v.lengthM), lengthFt: numOf(v.lengthFt) })
+  const thicknessUm = /^\d+$/.test(v.thicknessUm.trim()) ? Number(v.thicknessUm.trim()) : null
+  const netKg = siloBagNetKg({ perimeterM, lengthM, thicknessUm })
+  if (netKg == null || lengthM == null || thicknessUm == null) return { netKg: null, note: 'Diâmetro com perímetro real: informe comprimento e espessura para calcular' }
+  return { netKg, formula: siloBagFormulaText({ perimeterM, lengthM, thicknessUm }) }
+}
+
+/** peso líquido na tabela: selo "calculado" (perímetro real) ou "≠ cálculo" quando o cadastrado ainda é o da planilha */
+function NetKgCell({ r }: { r: CatalogRow }) {
+  const p = r.pack
+  const lengthM = calcLengthM(r)
+  const formula = r.calcNetKg != null && r.perimeterM != null && lengthM != null && r.thicknessUm != null ? siloBagFormulaText({ perimeterM: r.perimeterM, lengthM, thicknessUm: r.thicknessUm }) : null
+  return (
+    <td className="num" style={p && p.netKg <= 0 ? { color: 'var(--warn)' } : undefined}>
+      {p ? (p.netKg > 0 ? kg(p.netKg) : 'não informado') : '—'}
+      {p && r.calcNetKg != null && (
+        <>
+          <br />
+          {isCalculatedNet(p.netKg, r.calcNetKg) ? (
+            <span className="exp-src calc" title={`${formula} = ${nf2.format(r.calcNetKg)} kg`}>
+              calculado
+            </span>
+          ) : (
+            <span className="badge WARNING" title={`Calculado: ${nf2.format(r.calcNetKg)} kg (${formula}); cadastrado: ${kg3(p.netKg)}. ${packRecalcBlocker(p) ?? 'Salve os perímetros em Editar família para recalcular.'}`}>
+              ≠ cálculo
+            </span>
+          )}
+        </>
+      )}
+    </td>
+  )
+}
 
 export function CatalogClient({ families, rows, pallets, editable, showPrices }: Props) {
   const [q, setQ] = useState('')
@@ -329,9 +383,7 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
                         <TechCells familyName={f.name} v={r} />
                         <td style={{ whiteSpace: 'nowrap' }}>{r.boxCode ?? <span className="muted">—</span>}</td>
                         <td className="num">{r.pack ? `${nf0.format(r.pack.lengthMm)} × ${nf0.format(r.pack.widthMm)} × ${nf0.format(r.pack.heightMm)}` : <span className="badge UNVERIFIED">sem embalagem</span>}</td>
-                        <td className="num" style={r.pack && r.pack.netKg <= 0 ? { color: 'var(--warn)' } : undefined}>
-                          {r.pack ? (r.pack.netKg > 0 ? kg(r.pack.netKg) : 'não informado') : '—'}
-                        </td>
+                        <NetKgCell r={r} />
                         <td className="num">{r.pack ? kg(r.pack.grossKg) : '—'}</td>
                         <td className="num">{r.pack?.unitsPerPallet ?? '—'}</td>
                         <td style={{ whiteSpace: 'nowrap' }}>{r.pack?.palletCode ?? '—'}</td>
@@ -421,6 +473,8 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
       {famEditing && (
         <FamilyDialog
           value={famEditing}
+          family={famEditing.id != null ? families.find((f) => f.id === famEditing.id) : undefined}
+          rows={rows}
           onClose={() => setFamEditing(null)}
           onSaved={(name, isNew) => {
             setFamEditing(null)
@@ -527,13 +581,30 @@ function ItemDialog({
   onClose: () => void
   onSaved: (sku: string, isNew: boolean) => void
 }) {
-  const [v, setV] = useState(value)
+  // silo-bolsa com perímetro real: o peso líquido acompanha diâmetro/comprimento/espessura e o peso
+  // c/ embalagem anda junto (mantém a tara digitada = c/ embalagem − líquido)
+  const withCalc = (o: CatalogItemInput): CatalogItemInput => {
+    const c = siloCalc(o, families.find((f) => String(f.id) === o.familyId))?.netKg
+    if (c == null) return o
+    // embalagem em branco (fora o líquido, que aqui é calculado e não editável): o líquido também fica em branco,
+    // senão as medidas da caixa passariam a ser exigidas e não haveria como limpá-lo (embalagem é opcional)
+    if (![o.lengthMm, o.widthMm, o.heightMm, o.grossKg, o.unitsPerPallet].some((x) => x.trim() !== '')) return o.netKg === '' ? o : { ...o, netKg: '' }
+    const net = numOf(o.netKg)
+    if (isCalculatedNet(net, c)) return o
+    // líquido não informado (0): a tara é desconhecida — o c/ embalagem digitado fica como está (como no servidor)
+    const gross = numOf(o.grossKg)
+    return { ...o, netKg: dec(c), grossKg: gross != null && net != null && net > 0 ? dec(Math.round((gross + c - net) * 1000) / 1000) : o.grossKg }
+  }
+  const [v, setV] = useState(() => withCalc(value))
   const [err, setErr] = useState<{ error?: string; fieldErrors?: Record<string, string> }>({})
   const [pending, startTransition] = useTransition()
-  const set = <K extends keyof CatalogItemInput>(k: K, x: CatalogItemInput[K]) => setV((o) => ({ ...o, [k]: x }))
+  const set = <K extends keyof CatalogItemInput>(k: K, x: CatalogItemInput[K]) => setV((o) => withCalc({ ...o, [k]: x }))
   const fe = err.fieldErrors ?? {}
   const fam = families.find((f) => String(f.id) === v.familyId)
   const isNew = v.variantId == null
+  const calc = siloCalc(v, fam)
+  // peso que estava cadastrado (planilha), quando o calculado é diferente
+  const calcFrom = calc?.netKg != null && value.netKg.trim() !== '' && !isCalculatedNet(numOf(value.netKg), calc.netKg) ? numOf(value.netKg) : null
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -656,7 +727,26 @@ function ItemDialog({
               {num('heightMm', 'numeric')}
             </Field>
             <Field label="Peso líquido" unit="kg" error={fe.netKg}>
-              {num('netKg', 'decimal')}
+              {calc?.netKg != null ? (
+                <>
+                  <input
+                    value={dec(calc.netKg)}
+                    readOnly
+                    tabIndex={-1}
+                    title={`${calc.formula} = ${nf2.format(calc.netKg)} kg`}
+                    style={{ textAlign: 'right', background: '#f3f5f7', color: 'var(--muted)', cursor: 'default' }}
+                  />
+                  <small className="muted" title={`${calc.formula} = ${nf2.format(calc.netKg)} kg`}>
+                    Calculado pelo perímetro real (Editar família){calcFrom != null && ` — antes ${kg3(calcFrom)}`}
+                    {v.netKg.trim() === '' && ' — será gravado ao cadastrar a caixa'}
+                  </small>
+                </>
+              ) : (
+                <>
+                  {num('netKg', 'decimal')}
+                  {calc && <small className="muted">{calc.note}</small>}
+                </>
+              )}
             </Field>
             <Field label="Peso c/ embalagem (produto + caixa)" unit="kg" error={fe.grossKg}>
               {num('grossKg', 'decimal')}
@@ -740,10 +830,15 @@ function ItemDialog({
 
 function FamilyDialog({
   value,
+  family,
+  rows,
   onClose,
   onSaved,
 }: {
   value: FamilyForm
+  /** família já cadastrada (undefined = nova) */
+  family?: CatalogFamily
+  rows: CatalogRow[]
   onClose: () => void
   onSaved: (name: string, isNew: boolean) => void
 }) {
@@ -751,11 +846,19 @@ function FamilyDialog({
   const tech = parseTechOption(v.tech)
   const [err, setErr] = useState<{ error?: string; fieldErrors?: Record<string, string> }>({})
   const [pending, startTransition] = useTransition()
+  // perímetros digitados e ainda não salvos (botão próprio do editor): fechar ou salvar a família os descartaria
+  const [perimDirty, setPerimDirty] = useState(false)
+  const discardPerimOk = () =>
+    !perimDirty || window.confirm('Os perímetros digitados ainda não foram salvos (use "Salvar perímetros e recalcular pesos") e serão descartados. Continuar?')
+  const guardedClose = () => {
+    if (discardPerimOk()) onClose()
+  }
   return (
-    <Modal title={value.id == null ? '+ Nova família' : `Editar família ${value.name}`} onClose={onClose}>
+    <Modal title={value.id == null ? '+ Nova família' : `Editar família ${value.name}`} onClose={guardedClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
+          if (!discardPerimOk()) return
           startTransition(async () => {
             const r = await saveFamilyAction(v)
             if (r.ok) onSaved(v.name.trim(), value.id == null)
@@ -796,14 +899,16 @@ function FamilyDialog({
         )}
         <div className="row" style={{ marginTop: 14 }}>
           <span className="spacer" />
-          <button type="button" onClick={onClose}>
+          <button type="button" onClick={guardedClose}>
             Cancelar
           </button>
           <button className="primary" disabled={pending}>
-            {pending ? 'Salvando…' : 'Salvar'}
+            {pending ? 'Salvando…' : family?.perimeters ? 'Salvar família' : 'Salvar'}
           </button>
         </div>
       </form>
+      {/* Silo-bolsa: perímetro real por diâmetro — fora do formulário da família (estado e botão próprios) */}
+      {family?.perimeters && <PerimeterEditor family={family} rows={rows} onDirtyChange={setPerimDirty} />}
     </Modal>
   )
 }

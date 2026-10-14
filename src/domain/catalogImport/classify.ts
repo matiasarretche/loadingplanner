@@ -3,6 +3,7 @@
  * Ordem das regras = scripts/normalize.js da análise (acessórios → silo-bolsa em pés → reservatórios →
  * Hidropeso → bolsas para silagem → filmes → lonas), com as decisões do dono (decisions.ts).
  */
+import { calcLengthM, perimeterFor, siloBagFormulaText, siloBagNetKg, theoreticalPerimeterM, type SiloPerimeter } from '@/domain/siloPerimeter'
 import { cellDigits, cellNumber, cellText } from './cells'
 import type { ImportDecisions } from './decisions'
 import { eanStatusOf, PACIFIL_GS1_PREFIX } from './ean'
@@ -48,6 +49,15 @@ export interface OfficialProduct {
   tags: string[]
   color: string | null
   imperial: boolean
+  /** silo-bolsa: perímetro REAL cadastrado para o diâmetro (null = sem; vale o peso da planilha) */
+  realPerimeterM: number | null
+  /**
+   * silo-bolsa: líquido pelo perímetro real (domain/siloPerimeter). Só muda o peso GRAVADO: o líquido da planilha
+   * (netKg) continua decidindo repetidos, faixa de peso da caixa, tara e bruto.
+   */
+  calcNetKg: number | null
+  /** fórmula do líquido calculado: "8,70 m × 75 m × 208 µm × 0,932 g/cm³" */
+  calcNetFormula: string | null
   theoreticalNetKg: number | null
   netVsTheory: number | null
   /** problemas dos dados (vão para a prévia) */
@@ -58,6 +68,7 @@ export interface OfficialProduct {
 
 export type ClassifyResult = { ok: true; product: OfficialProduct } | { ok: false; reason: string }
 
+const kgText = (x: number) => String(round(x, 3)).replace('.', ',')
 const titleCase = (s: string) => s.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase())
 
 /** Marca da planilha → marca do catálogo. */
@@ -94,8 +105,9 @@ function tarpLine(group: string, lineText: string | null, d: ImportDecisions): L
 /**
  * Uma linha crua da planilha → produto oficial classificado (ou o motivo de não importar).
  * `sku`: produto fora da planilha (decisions.extraProducts) — o SKU dado é o código, sem a regra do código numérico.
+ * `siloPerimeters`: perímetros reais da família Silo-bolsa (vazio = peso da planilha para todos).
  */
-export function classifyRow(raw: RawProductRow, d: ImportDecisions, sku?: string): ClassifyResult {
+export function classifyRow(raw: RawProductRow, d: ImportDecisions, sku?: string, siloPerimeters: readonly SiloPerimeter[] = []): ClassifyResult {
   const code = sku ?? cellDigits(raw.code)
   const group = (cellText(raw.group) ?? '').toUpperCase()
   const measure = cellText(raw.measure) ?? ''
@@ -151,6 +163,9 @@ export function classifyRow(raw: RawProductRow, d: ImportDecisions, sku?: string
     tags: th.tags,
     color: th.color,
     imperial: false,
+    realPerimeterM: null,
+    calcNetKg: null,
+    calcNetFormula: null,
     theoreticalNetKg: null,
     netVsTheory: null,
     issues,
@@ -179,6 +194,13 @@ export function classifyRow(raw: RawProductRow, d: ImportDecisions, sku?: string
       p.lengthM = round(dm.b * FT_M, 3)
     } else p.lengthM = dm.b
     p.subLine = /SBG/.test(group) ? null : lineTextOf(pm)
+    // sigla de espessura da fábrica (BPT / BBT = tradicional, BPM = média): a espessura já está na medida — fora do nome
+    const tier = [p.subLine, ...p.tags].filter((x): x is string => !!x && (d.siloBagThicknessCodes.includes(x.toUpperCase()) || d.siloBagThicknessTags.includes(x.toUpperCase())))
+    if (tier.length) {
+      if (p.subLine && d.siloBagThicknessCodes.includes(p.subLine.toUpperCase())) p.subLine = null
+      p.tags = p.tags.filter((t) => !d.siloBagThicknessTags.includes(t.toUpperCase()))
+      p.notes.push(`sigla de espessura da fábrica (${tier.join(', ')}) fora do nome: a espessura já está na medida`)
+    }
   } else if (/HIDROSILO|HIDROFORCE/.test(group)) {
     p.kind = /HIDROFORCE/.test(group) ? 'HYDROFORCE' : 'HIDROSILO'
     p.family = p.kind === 'HYDROFORCE' ? 'HYDROFORCE' : 'HIDROSILO'
@@ -277,12 +299,26 @@ export function classifyRow(raw: RawProductRow, d: ImportDecisions, sku?: string
   if (!thicknessText && !/BUTIL|^ADESIVO/.test(group)) issues.push('espessura vazia (coluna D)')
   if (!known && brandRaw) issues.push(`marca "${brandRaw}" desconhecida`)
 
-  // peso teórico (geometria × espessura × densidade) — só para avisar
+  // silo-bolsa com perímetro real cadastrado (decisão de 14/10/2026): líquido = perímetro real × comprimento ×
+  // espessura × 0,932 g/cm³ — o mesmo que a tela Catálogo grava ao recalcular os pesos
+  if (p.kind === 'SILO_BAG' && !p.unitsPerPack) {
+    const perimeterM = perimeterFor(siloPerimeters, p.diameterFt)
+    const lengthM = calcLengthM(p)
+    p.realPerimeterM = perimeterM
+    p.calcNetKg = siloBagNetKg({ perimeterM, lengthM, thicknessUm: p.thicknessUm })
+    if (p.calcNetKg != null && perimeterM != null && lengthM != null && p.thicknessUm) {
+      p.calcNetFormula = siloBagFormulaText({ perimeterM, lengthM, thicknessUm: p.thicknessUm })
+      // produto fora da planilha: a observação vai junto com a origem do pedido (plan.ts)
+      if (!sku) notes.push(`líquido pelo perímetro real ${p.calcNetFormula} = ${kgText(p.calcNetKg)} kg (planilha ${p.netKg != null ? `${kgText(p.netKg)} kg` : 'sem peso líquido'})`)
+    }
+  }
+
+  // peso teórico (geometria × espessura × densidade) — só para avisar; silo-bolsa pelo perímetro real, se houver
   const units = p.unitsPerPack ?? 1
   const t = p.thicknessUm
   if (t && p.netKg) {
     let area: number | null = null
-    if (p.kind === 'SILO_BAG' && p.diameterFt && p.lengthM) area = Math.PI * p.diameterFt * FT_M * p.lengthM
+    if (p.kind === 'SILO_BAG' && p.diameterFt && p.lengthM) area = (p.realPerimeterM ?? theoreticalPerimeterM(p.diameterFt)) * p.lengthM
     else if ((p.kind === 'HIDROSILO' || p.kind === 'HYDROFORCE') && p.filmWidthM && p.lengthM) area = p.filmWidthM * p.lengthM
     else if (p.kind === 'SILAGE_BAG_BOX' && p.widthM && p.lengthM) area = 2 * p.widthM * p.lengthM
     else if ((p.kind === 'TARP' || p.kind === 'FILM_ROLL') && p.widthM && p.lengthM) area = p.widthM * p.lengthM
@@ -291,7 +327,7 @@ export function classifyRow(raw: RawProductRow, d: ImportDecisions, sku?: string
       p.netVsTheory = round(p.netKg / p.theoreticalNetKg, 3)
       if (p.netVsTheory < 0.85 || p.netVsTheory > 1.2) {
         const pct = Math.round((p.netVsTheory - 1) * 100)
-        issues.push(`peso líquido ${p.netKg} kg ${pct > 0 ? '+' : ''}${pct}% do teórico (${p.theoreticalNetKg} kg pela medida e espessura): o peso fecharia com ≈${Math.round(t * p.netVsTheory)} µm`)
+        issues.push(`peso líquido ${p.netKg} kg ${pct > 0 ? '+' : ''}${pct}% do teórico (${p.theoreticalNetKg} kg ${p.realPerimeterM != null ? 'pelo perímetro real, comprimento e espessura' : 'pela medida e espessura'}): o peso fecharia com ≈${Math.round(t * p.netVsTheory)} µm`)
       }
     }
   }

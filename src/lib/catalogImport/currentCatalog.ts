@@ -10,7 +10,8 @@ export type Exec = typeof db | Tx
 
 /**
  * Catálogo atual para o motor da importação: TODAS as variantes (ativas e inativas — o código oficial pode
- * coincidir com um SKU desativado), com família, linha e a embalagem de maior versão (com o código do palete).
+ * coincidir com um SKU desativado), com família, linha e a embalagem de maior versão (com o código do palete),
+ * e os perímetros reais cadastrados por família (peso líquido do silo-bolsa — domain/siloPerimeter.ts).
  * `active` = variante, linha e família ativas.
  */
 export async function loadCurrentCatalog(exec: Exec = db): Promise<CurrentCatalog> {
@@ -52,6 +53,10 @@ export async function loadCurrentCatalog(exec: Exec = db): Promise<CurrentCatalo
       active: s.palletTypes.active,
     })
     .from(s.palletTypes)
+  const perimeterRows = await exec
+    .select({ familyCode: s.productFamilies.code, diameterFt: s.familyPerimeters.diameterFt, perimeterM: s.familyPerimeters.perimeterM })
+    .from(s.familyPerimeters)
+    .innerJoin(s.productFamilies, eq(s.productFamilies.id, s.familyPerimeters.familyId))
 
   // embalagem vigente = maior versão de cada variante
   const packs = new Map<number, CurrentPack>()
@@ -96,23 +101,31 @@ export async function loadCurrentCatalog(exec: Exec = db): Promise<CurrentCatalo
     }))
     .sort((a, b) => a.variantId - b.variantId)
 
-  return { variants, families: families.sort((a, b) => a.id - b.id), lines: lines.sort((a, b) => a.id - b.id), palletTypes: palletTypes.sort((a, b) => a.id - b.id) }
+  return {
+    variants,
+    families: families.sort((a, b) => a.id - b.id),
+    lines: lines.sort((a, b) => a.id - b.id),
+    palletTypes: palletTypes.sort((a, b) => a.id - b.id),
+    realPerimeters: perimeterRows.sort((a, b) => a.familyCode.localeCompare(b.familyCode) || a.diameterFt - b.diameterFt),
+  }
 }
 
 /**
- * "Impressão digital" do catálogo: muda com qualquer produto/embalagem criado, alterado ou excluído, e com
- * linhas, famílias e paletes novos ou (des)ativados. A prévia guarda a de quando foi gerada; aplicar
- * exige a mesma (senão o plano pode estar desatualizado).
+ * "Impressão digital" do catálogo: muda com qualquer produto/embalagem criado, alterado ou excluído, com
+ * linhas, famílias e paletes novos ou (des)ativados e com qualquer perímetro real cadastrado, alterado ou
+ * excluído (muda o peso dos silo-bolsas). A prévia guarda a de quando foi gerada; aplicar exige a mesma
+ * (senão o plano pode estar desatualizado).
  */
 export async function catalogFingerprint(exec: Exec = db): Promise<string> {
-  const r = await exec.execute<{ v: string; pv: string; p: string; f: string; pt: string }>(sql`
+  const r = await exec.execute<{ v: string; pv: string; p: string; f: string; pt: string; fp: string }>(sql`
     SELECT
       (SELECT count(*) || '|' || coalesce(max(id), 0) || '|' || coalesce(max(updated_at)::text, '') FROM product_variant) AS v,
       (SELECT count(*) || '|' || coalesce(max(id), 0) || '|' || coalesce(max(updated_at)::text, '') FROM packaging_version) AS pv,
       (SELECT count(*) || '|' || count(*) FILTER (WHERE active) || '|' || coalesce(max(updated_at)::text, '') FROM product) AS p,
       (SELECT count(*) || '|' || count(*) FILTER (WHERE active) || '|' || coalesce(sum(sort), 0) FROM product_family) AS f,
-      (SELECT count(*) || '|' || count(*) FILTER (WHERE active) || '|' || coalesce(max(updated_at)::text, '') FROM pallet_type) AS pt
+      (SELECT count(*) || '|' || count(*) FILTER (WHERE active) || '|' || coalesce(max(updated_at)::text, '') FROM pallet_type) AS pt,
+      (SELECT count(*) || '|' || coalesce(max(updated_at)::text, '') || '|' || coalesce(string_agg(family_id || ':' || diameter_ft || '=' || perimeter_m, ',' ORDER BY family_id, diameter_ft), '') FROM family_perimeter) AS fp
   `)
   const row = r.rows[0]
-  return createHash('sha256').update([row.v, row.pv, row.p, row.f, row.pt].join('#')).digest('hex').slice(0, 32)
+  return createHash('sha256').update([row.v, row.pv, row.p, row.f, row.pt, row.fp].join('#')).digest('hex').slice(0, 32)
 }

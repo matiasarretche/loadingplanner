@@ -90,6 +90,9 @@ export function matchProduct(p: OfficialProduct, current: CurrentVariant[], bySk
   if (exact) return { match: { sku: exact.sku, variantId: exact.variantId, confidence: 'HIGH', lineRelation: 'EXACT_CODE', why: 'mesmo código (reimportação)' }, variant: exact, weak: null }
   const group = familyGroup(p.family)
   if (!group || p.thicknessUm == null) return { match: null, variant: null, weak: null }
+  // líquido comparado com o do catálogo: o que a importação grava (silo-bolsa pelo perímetro real, como a tela
+  // Catálogo recalcula), senão o da planilha
+  const pNet = p.calcNetKg ?? p.netKg
   const cands: { c: CurrentVariant; conf: Confidence; rel: Relation; thRel: number; netDiff: number; why: string }[] = []
   for (const c of current) {
     if (!c.active || familyGroup(c.familyCode) !== group) continue
@@ -101,7 +104,7 @@ export function matchProduct(p: OfficialProduct, current: CurrentVariant[], bySk
     if (thRel > (placeholder ? 0.03 : d.matchThicknessTolPct)) continue
     const rel = relationOf(p, c)
     const cNet = c.pack?.netKg ?? null
-    const netRel = cNet && p.netKg != null ? Math.abs(p.netKg - cNet) / cNet : 1
+    const netRel = cNet && pNet != null ? Math.abs(pNet - cNet) / cNet : 1
     const netOk = netRel <= d.matchNetTolPct || placeholder
     let conf: Confidence
     if (rel === 'SAME') conf = thRel <= 0.012 && netOk ? 'HIGH' : 'MEDIUM'
@@ -111,9 +114,9 @@ export function matchProduct(p: OfficialProduct, current: CurrentVariant[], bySk
       'família, marca e medida iguais',
       thRel === 0 ? 'espessura igual' : `espessura ${c.thicknessUm}→${p.thicknessUm} µm`,
       rel === 'SAME' ? `mesma linha (${c.line})` : rel === 'COMPATIBLE' ? `linha compatível (${c.line})` : `linha diferente (${c.line})`,
-      placeholder ? `líquido atual ${cNet} kg é provisório (máximo da faixa da tabela de caixas)` : netRel <= 0.005 ? 'líquido igual' : `líquido ${cNet ?? '—'}→${p.netKg ?? '—'} kg (${pct(netRel)})`,
+      placeholder ? `líquido atual ${cNet} kg é provisório (máximo da faixa da tabela de caixas)` : netRel <= 0.005 ? 'líquido igual' : `líquido ${cNet ?? '—'}→${pNet ?? '—'} kg (${pct(netRel)})`,
     ].join('; ')
-    cands.push({ c, conf, rel, thRel, netDiff: cNet != null && p.netKg != null ? Math.abs(p.netKg - cNet) : Infinity, why })
+    cands.push({ c, conf, rel, thRel, netDiff: cNet != null && pNet != null ? Math.abs(pNet - cNet) : Infinity, why })
   }
   cands.sort((a, b) => RANK[b.conf] - RANK[a.conf] || REL_RANK[b.rel] - REL_RANK[a.rel] || a.netDiff - b.netDiff || a.thRel - b.thRel || a.c.sku.localeCompare(b.c.sku))
   const best = cands[0]

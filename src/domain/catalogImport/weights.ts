@@ -51,16 +51,35 @@ export interface PlannedWeights {
   grossNote: string | null
 }
 
-/** Pesos da embalagem planejada, dada a tara da caixa atribuída. */
-export function plannedWeights(p: OfficialProduct, boxTareKg: number, d: ImportDecisions): PlannedWeights {
+/**
+ * Pesos da embalagem planejada, dada a tara da caixa atribuída. Com `calcNetKg` (silo-bolsa pelo perímetro real):
+ * grava o líquido calculado e bruto = calculado + a MESMA tara (bruto − líquido) que a regra dá com os pesos da
+ * planilha — a escolha do bruto (oficial ou líquido + caixa) continua sendo decidida pela planilha.
+ */
+export function plannedWeights(p: OfficialProduct, boxTareKg: number, d: ImportDecisions, calcNetKg?: number | null): PlannedWeights {
   const net = round(p.netKg ?? 0, 3)
   const problem = grossProblem(p, d, boxTareKg)
-  if (!problem && p.grossKg != null) return { netKg: net, grossKg: round(p.grossKg, 3), grossSource: 'OFFICIAL', grossNote: null }
-  const gross = round(net + boxTareKg, 3)
+  const official = !problem && p.grossKg != null
+  const gross = official ? round(p.grossKg!, 3) : round(net + boxTareKg, 3)
+  const unused = p.grossKg != null ? `bruto oficial ${kg(p.grossKg)} kg não usado: ${problem}` : 'planilha sem bruto'
+  if (calcNetKg != null) {
+    const tare = round(gross - net, 3)
+    const calc = round(calcNetKg, 3)
+    const calcGross = round(calc + tare, 3)
+    return {
+      netKg: calc,
+      grossKg: calcGross,
+      grossSource: official ? 'OFFICIAL' : 'NET_PLUS_BOX_TARE',
+      grossNote: official
+        ? `bruto = líquido pelo perímetro real + tara oficial (${kg(calc)} + ${kg(tare)} = ${kg(calcGross)} kg; planilha: líquido ${kg(net)} kg, bruto ${kg(gross)} kg)`
+        : `bruto = líquido pelo perímetro real + tara da caixa (${kg(calc)} + ${kg(tare)} = ${kg(calcGross)} kg); ${unused}`,
+    }
+  }
+  if (official) return { netKg: net, grossKg: gross, grossSource: 'OFFICIAL', grossNote: null }
   return {
     netKg: net,
     grossKg: gross,
     grossSource: 'NET_PLUS_BOX_TARE',
-    grossNote: `bruto = líquido + tara da caixa (${kg(net)} + ${kg(boxTareKg)} = ${kg(gross)} kg)${p.grossKg != null ? `; bruto oficial ${kg(p.grossKg)} kg não usado: ${problem}` : '; planilha sem bruto'}`,
+    grossNote: `bruto = líquido + tara da caixa (${kg(net)} + ${kg(boxTareKg)} = ${kg(gross)} kg); ${unused}`,
   }
 }

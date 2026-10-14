@@ -21,6 +21,8 @@ export async function pendingWorkbook(plan: ImportPlan, importId: number): Promi
     { header: 'Marca', key: 'brand', width: 12 },
     { header: 'Peso líquido', key: 'net', width: 13, style: { numFmt: '#,##0.000' } },
     { header: 'Peso bruto', key: 'gross', width: 13, style: { numFmt: '#,##0.000' } },
+    // silo-bolsa com perímetro real cadastrado: o líquido que o Catálogo grava (perímetro real × comprimento × espessura × 0,932)
+    { header: 'Líquido (perímetro real)', key: 'calc', width: 14, style: { numFmt: '#,##0.00' } },
     { header: 'EAN', key: 'ean', width: 17, style: { numFmt: '@' } },
     { header: 'Motivo', key: 'reason', width: 60 },
     { header: 'Caixa sugerida', key: 'box', width: 14, style: { numFmt: '@' } },
@@ -39,6 +41,7 @@ export async function pendingWorkbook(plan: ImportPlan, importId: number): Promi
       brand: p?.brand ?? p?.source.brand ?? '',
       net: p?.source.netKg ?? null,
       gross: p?.source.grossKg ?? null,
+      calc: p?.calcNetKg ?? null,
       ean: p?.ean ?? '',
       reason: x.reason,
       box: x.suggestion?.boxCode ?? '',
@@ -46,7 +49,7 @@ export async function pendingWorkbook(plan: ImportPlan, importId: number): Promi
       units: x.unitsPerPackHint ?? null,
     })
   }
-  ws.autoFilter = { from: 'A1', to: 'M1' }
+  ws.autoFilter = { from: 'A1', to: 'N1' }
   const info = wb.addWorksheet('Sobre')
   info.addRows([
     ['Prévia da importação', `#${importId}`],

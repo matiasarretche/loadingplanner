@@ -28,11 +28,13 @@ describe.skipIf(!dir)('planilha oficial inteira', () => {
     // EAN antes de descartar os repetidos: 636 EAN-13, 17 GTIN-14, 14 inválidos
     const st = input.products.map((r) => eanStatusOf(cellDigits(r.ean)).status)
     expect([st.filter((x) => x === 'EAN13').length, st.filter((x) => x === 'GTIN14').length, st.filter((x) => x === 'INVALID').length]).toEqual([636, 17, 14])
-    // 90 / 111: inclui a lona 19771 do grupo SBG = 17367 do grupo BPF (as duas Lona padrão 8 × 100 m × 120 µm)
-    expect(s.duplicateGroups).toBe(90)
-    expect(s.duplicatesDiscarded).toBe(111)
-    // 556 da planilha + 2 fora dela (silo-bolsas 10 pés × 100 / × 60 m × 235 µm)
-    expect(s.planned).toBe(558)
+    // 98 / 131: inclui a lona 19771 do grupo SBG = 17367 do grupo BPF (as duas Lona padrão 8 × 100 m × 120 µm) e os
+    // 20 silo-bolsas que só diferiam pela sigla de espessura da fábrica (BPT / BBT / BPM — Matías, 14/10/2026)
+    expect(s.duplicateGroups).toBe(98)
+    expect(s.duplicatesDiscarded).toBe(131)
+    // 536 da planilha + 2 fora dela (silo-bolsas 10 pés × 100 / × 60 m × 235 µm)
+    expect(s.planned).toBe(538)
+    expect(plan.products.filter((x) => /\((BPT|BBT|BPM)/.test(x.name))).toEqual([])
     expect(plan.warnings.find((w) => w.code === 'DUPLICATES')?.message).toContain('20012 → 17018; 19489 → 17262; 19403 → 17474; 18145 → 17039; 17973/17129 → 16669; 17126 → 16670')
     expect(s.withPackaging + s.pending).toBe(s.planned)
     expect(plan.warnings.some((w) => w.level === 'BLOCKER')).toBe(false)
@@ -49,7 +51,8 @@ describe.skipIf(!dir)('planilha oficial inteira', () => {
     const pk = (c: string) => plan.products.find((x) => x.code === c)?.packaging
     expect(pk('17822')).toMatchObject({ boxCode: '52185' })
     for (const c of ['19835', '19930', '19833', '19837']) expect(pk(c)).toMatchObject({ boxCode: '74645', palletTypeCode: 'PCF-1150-DUPLO', unitsPerPallet: 9 })
-    for (const c of ['19595', '17379', '17298']) expect(pk(c)).toMatchObject({ palletTypeCode: 'PBR-1', unitsPerPallet: 8 })
+    // 17379 (BPT 10 × 75 × 250) saiu como repetido do 19595 (sigla de espessura)
+    for (const c of ['19595', '17298']) expect(pk(c)).toMatchObject({ palletTypeCode: 'PBR-1', unitsPerPallet: 8 })
     for (const c of ['19896', '19794', '17426']) expect(pk(c)).toMatchObject({ palletTypeCode: 'PCF-1100x1300', unitsPerPallet: 12 })
     expect(pk('17353')).toMatchObject({ palletTypeCode: 'PCF-1150', unitsPerPallet: 4 })
     expect(plan.products.filter((x) => (x.packaging?.palletHeightMm ?? 0) > 2292).map((x) => x.code)).toEqual([])

@@ -24,6 +24,14 @@ type PvRow = typeof s.packagingVersions.$inferSelect
 const CHUNK = 100
 const r3 = (x: number) => Math.round(x * 1000) / 1000
 
+/** impasse do PostgreSQL (40P01: outra transação travava o catálogo), inclusive quando embrulhado pelo Drizzle */
+function isDeadlock(e: unknown): boolean {
+  for (let cur: unknown = e, i = 0; cur && i < 5; cur = (cur as { cause?: unknown }).cause, i++) {
+    if ((cur as { code?: string }).code === '40P01') return true
+  }
+  return false
+}
+
 const STATUS_MSG: Record<string, string> = {
   APPLIED: 'Esta importação já foi aplicada.',
   SYNCING: 'Esta importação já foi aplicada (montagens de palete em atualização).',
@@ -117,8 +125,10 @@ export async function applyCatalogImport(id: number, userId: number, o: { dryRun
       const blockers = plan.warnings.filter((w) => w.level === 'BLOCKER')
       if (blockers.length) throw new CatalogImportError(`A prévia tem bloqueios: ${blockers.map((b) => b.message).join(' · ')}`)
 
-      // ninguém altera o catálogo enquanto a importação grava (as edições esperam o fim da transação)
-      await tx.execute(sql`LOCK TABLE product_family, product, product_variant, packaging_version, pallet_type IN SHARE ROW EXCLUSIVE MODE`)
+      // ninguém altera o catálogo enquanto a importação grava (as edições esperam o fim da transação). Ordem das
+      // travas: perímetros → famílias → produtos → variantes → embalagens → paletes — a mesma do recálculo e da
+      // edição manual de silo-bolsa (src/lib/siloPerimeters.ts), que travam family_perimeter primeiro: sem impasse
+      await tx.execute(sql`LOCK TABLE family_perimeter, product_family, product, product_variant, packaging_version, pallet_type IN SHARE ROW EXCLUSIVE MODE`)
       if ((await catalogFingerprint(tx)) !== row.catalogFingerprint) throw new CatalogImportError('O catálogo mudou desde a prévia — gere a prévia de novo.')
 
       const result = await applyPlan(tx, id, plan, userId)
@@ -151,6 +161,7 @@ export async function applyCatalogImport(id: number, userId: number, o: { dryRun
     if (e instanceof Rollback) return { ...e.result, durationMs: Date.now() - t0 }
     if (e instanceof CatalogImportError) throw e
     if (isUniqueViolation(e)) throw new CatalogImportError('Um dos códigos já existe no catálogo (alguém cadastrou durante a prévia?) — gere a prévia de novo.')
+    if (isDeadlock(e)) throw new CatalogImportError('Outra alteração do catálogo estava em andamento — tente de novo.')
     throw e
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildPriceTwins } from '@/domain/exportPricing'
 import { allowedByLonaRule, isRuleLona, lonaWidthM } from '@/domain/lonaRule'
+import { calcLengthM, perimeterFor, siloBagNetKg } from '@/domain/siloPerimeter'
 import { buildBoxModels } from './boxSheet'
 import { FIXTURE_BOX_ROWS, FIXTURE_CURRENT, FIXTURE_PRODUCT_ROWS, fixtureFile } from './fixtures'
 import { buildImportPlan, DEFAULT_DECISIONS, ENGINE_VERSION } from './index'
@@ -132,7 +133,8 @@ describe('classificação e nomes (decisões 3, 4, 5, 6)', () => {
   it('silo-bolsa e reservatórios no formato atual; EXT. B vira Pacifil', () => {
     expect(P('19924').name).toBe('Silo-bolsa 9 pés × 75 m × 208 µm')
     expect(P('19950').name).toBe('Silo-bolsa Ecobag 9 pés × 75 m × 200 µm')
-    expect(P('17303').name).toBe('Silo-bolsa 6 pés × 100 m × 160 µm (BPT)')
+    // sigla de espessura da fábrica (BPT / BBT / BPM) fora do nome: a espessura já está na medida (Matías, 14/10/2026)
+    expect(P('17303').name).toBe('Silo-bolsa 6 pés × 100 m × 160 µm')
     expect(P('18060')).toMatchObject({ brand: 'Pacifil', name: 'Hidrosilo 2 × 3 m × 600 µm — 2.000 L' })
     expect(P('18010').name).toBe('Hidrosilo 2 × 50 m × 600 µm — 50.000 L')
     expect(P('20027').name).toBe('Hidrosilo 2,15 × 20 m × 500 µm 4V (filme 4,3 m)')
@@ -473,5 +475,222 @@ describe('produtos fora da planilha (decisão extraProducts, 14/10/2026)', () =>
     const pl = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...FIXTURE_CURRENT.variants, ...asCurrent] } }))
     for (const c of ['SB-PAC-10X100-235', 'SB-PAC-10X60-235']) expect(P(c, pl)).toMatchObject({ action: 'UPDATE', match: { lineRelation: 'EXACT_CODE' } })
     expect(pl.deactivations.variants.some((v) => v.sku === 'SB-PAC-10X100-235' || v.sku === 'SB-PAC-10X60-235')).toBe(false)
+  })
+})
+
+describe('silo-bolsa: peso líquido pelo perímetro real (14/10/2026)', () => {
+  const realPerimeters = [
+    { familyCode: 'SILO_BAG', diameterFt: 6, perimeterM: 5.75 },
+    { familyCode: 'SILO_BAG', diameterFt: 9, perimeterM: 8.7 },
+    { familyCode: 'SILO_BAG', diameterFt: 10, perimeterM: 9.65 },
+  ]
+  const r3 = (x: number) => Math.round(x * 1000) / 1000
+  const withP = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, realPerimeters } }))
+  const pkP = (code: string, pl: ImportPlan = withP) => {
+    const p = P(code, pl).packaging
+    if (!p) throw new Error(`${code} sem embalagem`)
+    return p
+  }
+  // catálogo "depois de aplicar" um plano: os planejados viram variantes atuais com a embalagem planejada
+  const asCurrent = (pl: ImportPlan): CurrentVariant[] =>
+    pl.products.map((x, i) => ({
+      variantId: 7000 + i,
+      productId: 1,
+      sku: x.code,
+      name: x.name,
+      familyCode: DEFAULT_DECISIONS.families[x.family].code,
+      familyName: DEFAULT_DECISIONS.families[x.family].name,
+      line: x.productLine,
+      brand: x.brand,
+      active: true,
+      thicknessUm: x.thicknessUm,
+      diameterFt: x.diameterFt,
+      widthM: x.widthM,
+      lengthM: x.lengthM,
+      lengthFt: x.lengthFt,
+      attrs: x.attrs,
+      ean: x.ean,
+      pack: x.packaging
+        ? { packagingVersionId: 9500 + i, version: 1, locked: false, lengthMm: x.packaging.lengthMm, widthMm: x.packaging.widthMm, heightMm: x.packaging.heightMm, netKg: x.packaging.netKg, grossKg: x.packaging.grossKg, unitsPerPackage: 1, unitsPerPallet: x.packaging.unitsPerPallet, palletTypeCode: x.packaging.palletTypeCode, verification: x.packaging.verification }
+        : null,
+    }))
+  const old = FIXTURE_CURRENT.variants.map((v) => ({ ...v, active: v.sku === 'KIT-HF' }))
+  /** "Salvar perímetros e recalcular" na tela Catálogo (mesma fórmula): líquido calculado, bruto = calculado + tara; verificação copiada */
+  const recalculated = (vs: CurrentVariant[]): CurrentVariant[] => {
+    const table = realPerimeters.map(({ diameterFt, perimeterM }) => ({ diameterFt, perimeterM }))
+    return vs.map((v) => {
+      const perimeterM = v.familyCode === 'SILO_BAG' ? perimeterFor(table, v.diameterFt) : null
+      const net = perimeterM != null ? siloBagNetKg({ perimeterM, lengthM: calcLengthM(v), thicknessUm: v.thicknessUm }) : null
+      return v.pack && net != null ? { ...v, pack: { ...v.pack, netKg: net, grossKg: r3(net + (v.pack.grossKg - v.pack.netKg)) } } : v
+    })
+  }
+  /** a reimportação não muda a embalagem gravada (os campos que apply.ts › samePack compara) */
+  const expectSamePack = (pl: ImportPlan, cur: CurrentVariant[]) => {
+    const byCode = new Map(cur.map((v) => [v.sku, v]))
+    let checked = 0
+    for (const x of pl.products) {
+      const c = byCode.get(x.code)!
+      expect(x.match).toMatchObject({ lineRelation: 'EXACT_CODE', sku: x.code, confidence: 'HIGH' })
+      expect(x.existingVariantId).toBe(c.variantId)
+      if (!c.pack) continue
+      const pk = x.packaging!
+      expect([x.code, r3(pk.netKg), r3(pk.grossKg)]).toEqual([x.code, r3(c.pack.netKg), r3(c.pack.grossKg)])
+      expect([pk.lengthMm, pk.widthMm, pk.heightMm, pk.unitsPerPallet, pk.palletTypeCode, pk.verification]).toEqual([c.pack.lengthMm, c.pack.widthMm, c.pack.heightMm, c.pack.unitsPerPallet, c.pack.palletTypeCode, c.pack.verification])
+      checked++
+    }
+    expect(checked).toBeGreaterThan(0)
+  }
+
+  it('caixa, confiança, palete e equivalente iguais aos do plano sem a tabela; só o peso gravado muda, com a mesma tara', () => {
+    expect(withP.products.map((x) => x.code)).toEqual(plan.products.map((x) => x.code))
+    expect(withP.pending).toEqual(plan.pending)
+    expect(withP.discarded).toEqual(plan.discarded)
+    expect(withP.summary).toEqual(plan.summary)
+    let calculated = 0
+    for (const x of withP.products) {
+      const before = P(x.code)
+      expect([x.match?.sku, x.match?.confidence, x.match?.lineRelation]).toEqual([before.match?.sku, before.match?.confidence, before.match?.lineRelation])
+      const a = before.packaging
+      const b = x.packaging
+      expect(b == null).toBe(a == null)
+      if (!a || !b) continue
+      const core = (k: typeof a) => [k.boxCode, k.boxSheetRow, k.lengthMm, k.widthMm, k.heightMm, k.confidence, k.palletTypeCode, k.unitsPerPallet, k.palletSource, k.grossSource, k.verification]
+      expect(core(b)).toEqual(core(a))
+      if (b.netSource === 'REAL_PERIMETER') {
+        calculated++
+        expect(x.family).toBe('SILO_BAG')
+        expect(b.netKg).toBe(x.calcNetKg)
+        expect(b.sheetNetKg).toBe(a.netKg)
+        expect(r3(b.grossKg - b.netKg)).toBe(r3(a.grossKg - a.netKg))
+        expect(b.notes.join(' ')).toContain('líquido pelo perímetro real')
+      } else expect([b.netSource, b.netKg, b.grossKg]).toEqual(['SHEET', a.netKg, a.grossKg])
+    }
+    expect(calculated).toBeGreaterThan(10)
+  })
+  it('9 pés × 75 m × 208 µm (19924): 8,70 × 75 × 208 µm × 0,932 = 126,49 kg; bruto = líquido + tara da caixa', () => {
+    expect(P('19924', withP).calcNetKg).toBe(126.49)
+    expect(pkP('19924')).toMatchObject({ boxCode: '69490', netKg: 126.49, grossKg: 133, netSource: 'REAL_PERIMETER', sheetNetKg: 126.49, realPerimeterM: 8.7, grossSource: 'NET_PLUS_BOX_TARE' })
+    expect(pkP('19924').grossNote).toContain('132,75')
+    expect(P('19924', withP).dataIssues.join(' ')).toContain('líquido pelo perímetro real 8,70 m × 75 m × 208 µm × 0,932 g/cm³ = 126,49 kg (planilha 126,49 kg)')
+  })
+  it('pendente sem caixa também traz o calculado', () => {
+    // 6 pés × 100 m × 160 µm: 5,75 × 100 × 160 µm × 0,932 = 85,74 kg
+    expect(P('17303', withP)).toMatchObject({ packaging: null, calcNetKg: 85.74 })
+    expect(withP.pending.find((x) => x.code === '17303')?.reasonCode).toBe('SILO_BAG_WEIGHT_GAP')
+  })
+  it('fora da planilha (10 pés × 100 / × 60 m × 235 µm): calculado 211,35 / 126,81 kg, observação sem "ESTIMADO"', () => {
+    expect(pkP('SB-PAC-10X100-235')).toMatchObject({ netKg: 211.35, netSource: 'REAL_PERIMETER', sheetNetKg: 213.2, boxCode: '74043', grossSource: 'NET_PLUS_BOX_TARE' })
+    expect(pkP('SB-PAC-10X60-235').netKg).toBe(126.81)
+    for (const c of ['SB-PAC-10X100-235', 'SB-PAC-10X60-235']) {
+      expect(r3(pkP(c).grossKg - pkP(c).netKg)).toBe(r3(pk(c).grossKg - pk(c).netKg))
+      const obs = `${P(c, withP).notes} ${P(c, withP).dataIssues.join(' ')}`
+      expect(obs).not.toContain('ESTIMADO')
+      expect(obs).toContain('calculado pelo perímetro real 9,65 m ×')
+    }
+    expect(P('SB-PAC-10X100-235', withP).notes).toContain('= 211,35 kg (no lugar da estimativa de 213,2 kg)')
+    expect(withP.warnings.find((w) => w.code === 'EXTRA_PRODUCTS')?.message).toContain('peso líquido pelo perímetro real')
+  })
+  it('diâmetro sem perímetro real (12 e 14 pés): peso da planilha', () => {
+    expect(P('19983', withP).calcNetKg).toBeNull()
+    expect(pkP('19983')).toMatchObject({ netKg: 420, grossKg: 437.45, netSource: 'SHEET' })
+    expect(pkP('19983').sheetNetKg).toBeUndefined()
+    expect(P('17353', withP).calcNetKg).toBeNull()
+    expect(pkP('17353')).toMatchObject({ netKg: pk('17353').netKg, grossKg: pk('17353').grossKg, netSource: 'SHEET' })
+  })
+  it('perímetro de outra família não vale para o silo-bolsa', () => {
+    const pl = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, realPerimeters: realPerimeters.map((r) => ({ ...r, familyCode: 'SILAGE_TARP' })) } }))
+    expect(pl.products.every((x) => x.calcNetKg == null && x.packaging?.netSource !== 'REAL_PERIMETER')).toBe(true)
+    expect(pl.warnings.find((w) => w.code === 'NET_FROM_REAL_PERIMETER')).toBeUndefined()
+  })
+  it('aviso: quantos silo-bolsas gravam o calculado e quais diferem mais de 2% da planilha', () => {
+    const w = withP.warnings.find((x) => x.code === 'NET_FROM_REAL_PERIMETER')
+    const n = withP.products.filter((x) => x.packaging?.netSource === 'REAL_PERIMETER').length
+    expect(w).toMatchObject({ level: 'INFO' })
+    expect(w?.message.startsWith(`${n} silo-bolsa(s) gravam`)).toBe(true)
+    const far = withP.products.filter((x) => x.calcNetKg != null && x.source.netKg && Math.abs(x.calcNetKg - x.source.netKg) / x.source.netKg > 0.02).map((x) => x.code)
+    expect(w?.codes ?? []).toEqual(far)
+    expect(plan.warnings.find((x) => x.code === 'NET_FROM_REAL_PERIMETER')).toBeUndefined()
+  })
+  it('reimportação depois do recálculo: nenhuma mudança de peso nem de embalagem; tudo pelo mesmo código', () => {
+    const cur = asCurrent(withP)
+    const again = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...old, ...cur], realPerimeters } }))
+    expect(again.summary.toUpdate).toBe(withP.summary.planned)
+    expectSamePack(again, cur)
+  })
+  it('catálogo importado antes e recalculado na tela Catálogo (mesma fórmula): a reimportação não muda o peso', () => {
+    const before = asCurrent(plan)
+    const cur = recalculated(before)
+    expect(cur.filter((v, i) => v.pack && v.pack.netKg !== before[i].pack?.netKg).length).toBeGreaterThan(5)
+    const again = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...old, ...cur], realPerimeters } }))
+    expectSamePack(again, cur)
+  })
+  it('verificação: embalagem VERIFICADA continua verificada importando antes ou depois do recálculo (mesmo resultado)', () => {
+    // catálogo com o peso da planilha (antes de cadastrar os perímetros) e as embalagens de silo-bolsa verificadas
+    const base = asCurrent(plan).map((v) => (v.pack && v.familyCode === 'SILO_BAG' ? { ...v, pack: { ...v.pack, verification: 'VERIFIED' as const } } : v))
+    // ordem A: importa com a tabela já cadastrada, antes de recalcular (o líquido muda só pela fórmula)
+    const a = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...old, ...base], realPerimeters } }))
+    // ordem B: recalcula na tela Catálogo (copia a verificação) e depois importa
+    const recalc = recalculated(base)
+    const b = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...old, ...recalc], realPerimeters } }))
+    expectSamePack(b, recalc)
+    const state = (pl: ImportPlan) => pl.products.map((x) => [x.code, x.packaging?.netKg, x.packaging?.grossKg, x.packaging?.verification])
+    expect(state(a)).toEqual(state(b))
+    const calc = a.products.filter((x) => x.packaging?.netSource === 'REAL_PERIMETER')
+    expect(calc.length).toBeGreaterThan(10)
+    for (const x of calc) expect([x.code, x.packaging!.verification]).toEqual([x.code, 'VERIFIED'])
+    // inclusive quando o calculado difere mais de 2% do peso gravado (6 pés × 60 m × 170 µm: 53 → 54,66 kg)
+    const x = P('17018', a)
+    const was = base.find((v) => v.sku === '17018')!.pack!
+    expect(Math.abs(x.packaging!.netKg - was.netKg) / was.netKg).toBeGreaterThan(0.02)
+    expect(x.packaging).toMatchObject({ verification: 'VERIFIED', netSource: 'REAL_PERIMETER' })
+    // caixa diferente: deixa de ser verificada
+    const otherBox = base.map((v) => (v.sku === '17018' && v.pack ? { ...v, pack: { ...v.pack, heightMm: v.pack.heightMm + 50 } } : v))
+    const c = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...old, ...otherBox], realPerimeters } }))
+    expect(P('17018', c).packaging?.verification).toBe('ESTIMATED')
+  })
+  it('ficha do produto: attrs.perimetro_m = perímetro real da família (criar e atualizar), como no recálculo', () => {
+    const calc = withP.products.filter((x) => x.packaging?.netSource === 'REAL_PERIMETER')
+    expect(calc.length).toBeGreaterThan(10)
+    for (const x of calc) expect([x.code, x.attrs.perimetro_m]).toEqual([x.code, x.packaging!.realPerimeterM])
+    // produto novo: π × D sem a tabela, o real com ela
+    expect(P('19763')).toMatchObject({ action: 'CREATE', attrs: { perimetro_m: 8.618 } })
+    expect(P('19763', withP)).toMatchObject({ action: 'CREATE', attrs: { perimetro_m: 8.7 } })
+    // pendente sem caixa (o peso não muda) também mostra o perímetro real
+    expect(P('17303', withP)).toMatchObject({ packaging: null, attrs: { perimetro_m: 5.75 } })
+    // reimportação de um catálogo gravado com π × D: passa ao real (antes o valor atual prevalecia)
+    const again = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...old, ...asCurrent(plan)], realPerimeters } }))
+    expect(P('19763', again)).toMatchObject({ action: 'UPDATE', attrs: { perimetro_m: 8.7 } })
+    // diâmetro sem perímetro real (12 pés): continua o atual / π × D
+    expect(P('19983', withP).attrs.perimetro_m).toBe(P('19983').attrs.perimetro_m)
+  })
+})
+
+describe('siglas de espessura da fábrica no silo-bolsa (BPT / BBT = tradicional, BPM = média; Matías, 14/10/2026)', () => {
+  // as 3 versões de 9 pés × 60 m × 240 µm da planilha + o 9 × 60 × 210 com e sem BPM + um BPM "média" sem gêmeo
+  const rows = [
+    { row: 901, code: 19609, group: 'SILO PLAS/RESERV SBG', measure: '9PESX60M', thickness: '240MIC', brand: 'PACIFIL', netKg: 116.8, grossKg: 122.7, ean: null },
+    { row: 902, code: 16859, group: 'SILO PLASTICO/RESERV', measure: 'BBT 9PESX60M', thickness: '240 MICRAS', brand: 'PACIFIL', netKg: 114.2, grossKg: 120.1, ean: null },
+    { row: 903, code: 16690, group: 'SILO PLASTICO/RESERV', measure: 'BPT 9PESX60M', thickness: '240 MICRAS', brand: 'PACIFIL', netKg: 114.5, grossKg: 120.41, ean: null },
+    { row: 904, code: 18174, group: 'SILO PLASTICO/RESERV', measure: 'BPM 9PESX60M', thickness: '210 MICRAS', brand: 'PACIFIL', netKg: 102.17, grossKg: 108.08, ean: null },
+    { row: 905, code: 18143, group: 'SILO PLAS/RESERV SBG', measure: '9PESX60M', thickness: '210MIC', brand: 'PACIFIL', netKg: 102.17, grossKg: 108.08, ean: null },
+    { row: 906, code: 19052, group: 'SILO PLASTICO/RESERV', measure: 'BPM 9PESX150M', thickness: '220 MICRAS / MEDIA', brand: 'PACIFIL', netKg: 261.5, grossKg: 270, ean: null },
+  ]
+  const pl = buildImportPlan(input({ products: [...FIXTURE_PRODUCT_ROWS.filter((r) => !rows.some((x) => x.code === r.code)), ...rows] }))
+  const Q = (c: string) => pl.products.find((x) => x.code === c)
+  it('a sigla sai do nome e a mesma medida e espessura com e sem sigla é repetida: fica o código mais recente', () => {
+    expect(Q('19609')?.name).toBe('Silo-bolsa 9 pés × 60 m × 240 µm')
+    for (const c of ['16859', '16690']) expect(pl.discarded.find((x) => x.code === c)).toMatchObject({ keptCode: '19609' })
+    expect(pl.discarded.find((x) => x.code === '16690')?.reason).toContain('sigla de espessura')
+    // o mais recente pode ser o que tinha a sigla: fica, com o nome sem ela
+    expect(Q('18174')?.name).toBe('Silo-bolsa 9 pés × 60 m × 210 µm')
+    expect(pl.discarded.find((x) => x.code === '18143')).toMatchObject({ keptCode: '18174' })
+    expect(Q('18174')?.dataIssues.join(' ')).toContain('sigla de espessura da fábrica (BPM)')
+  })
+  it('"MEDIA" na espessura também sai do nome; sem gêmeo, o produto continua', () => {
+    expect(Q('19052')?.name).toBe('Silo-bolsa 9 pés × 150 m × 220 µm')
+  })
+  it('nenhum par de produtos com o mesmo nome', () => {
+    const names = pl.products.map((x) => x.name)
+    expect(new Set(names).size).toBe(names.length)
   })
 })

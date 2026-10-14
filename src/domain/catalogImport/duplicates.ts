@@ -23,9 +23,14 @@ const normGroup = (g: string) => g.toUpperCase().replace(/\s+/g, ' ').trim()
 const groupKey = (p: OfficialProduct) => normGroup(p.group)
 const NOT_GROUPS = new Set(['namedBpfPrefix', 'otherPlain', 'multilayer'])
 
-/** Grupo da chave: o da planilha; a lona do grupo SBG usa o único grupo de lonas que cai na mesma linha. */
+/**
+ * Grupo da chave: o da planilha; a lona do grupo SBG usa o único grupo de lonas que cai na mesma linha. O silo-bolsa
+ * compara entre os grupos (SBG × SILO PLASTICO/RESERV): lá ele só aparece com a sigla de espessura (BPT / BBT / BPM),
+ * que fica fora da comparação — "BPT 9PESX60M 240 MICRAS" = "9PESX60M 240MIC" (Matías, 14/10/2026).
+ */
 function keyGroup(p: OfficialProduct, d: ImportDecisions): string {
   const g = groupKey(p)
+  if (p.kind === 'SILO_BAG') return 'SILO-BOLSA'
   if (p.kind !== 'TARP' || !/SBG$/.test(g)) return g
   const homes = Object.entries(d.tarpGroupLine).filter(([k, line]) => !NOT_GROUPS.has(k) && line === p.lineKey)
   return homes.length === 1 ? normGroup(homes[0][0]) : g
@@ -93,12 +98,15 @@ export function dedupe(products: OfficialProduct[], d: ImportDecisions): DedupeR
       const why = bad.get(p)!
       const higher = codeNum(p.code) > codeNum(chosen.code)
       const txt = (x: OfficialProduct) => `${x.measure} ${x.thicknessText ?? ''}`.trim()
+      const tierCode = (x: OfficialProduct) => d.siloBagThicknessCodes.some((c) => new RegExp(`^\\s*${c}\\b`, 'i').test(x.measure))
       const spelling =
-        groupKey(p) !== groupKey(chosen)
-          ? ` — a mesma lona em outro grupo da planilha ("${p.group}" × "${chosen.group}")`
-          : rawKey(p) !== rawKey(chosen)
-            ? ` — o mesmo produto escrito de outro jeito ("${txt(p)}" × "${txt(chosen)}")`
-            : ''
+        p.kind === 'SILO_BAG' && (tierCode(p) || tierCode(chosen))
+          ? ` — o mesmo silo-bolsa com/sem a sigla de espessura da fábrica ("${txt(p)}" × "${txt(chosen)}")`
+          : groupKey(p) !== groupKey(chosen)
+            ? ` — a mesma lona em outro grupo da planilha ("${p.group}" × "${chosen.group}")`
+            : rawKey(p) !== rawKey(chosen)
+              ? ` — o mesmo produto escrito de outro jeito ("${txt(p)}" × "${txt(chosen)}")`
+              : ''
       discarded.push({
         code: p.code,
         row: p.row,

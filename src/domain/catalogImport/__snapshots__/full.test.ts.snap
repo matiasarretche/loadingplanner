@@ -9,18 +9,8 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "products": 38,
     },
     {
-      "boxCode": "74043",
-      "dims": "1140×570×570",
-      "products": 28,
-    },
-    {
       "boxCode": "69490",
       "dims": "1000×600×450",
-      "products": 27,
-    },
-    {
-      "boxCode": "69488",
-      "dims": "1000×600×400",
       "products": 24,
     },
     {
@@ -29,14 +19,24 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "products": 24,
     },
     {
+      "boxCode": "74043",
+      "dims": "1140×570×570",
+      "products": 23,
+    },
+    {
+      "boxCode": "69488",
+      "dims": "1000×600×400",
+      "products": 20,
+    },
+    {
       "boxCode": "52185",
       "dims": "550×500×400",
-      "products": 21,
+      "products": 19,
     },
     {
       "boxCode": "69491",
       "dims": "1000×600×490",
-      "products": 18,
+      "products": 16,
     },
     {
       "boxCode": "75382",
@@ -46,7 +46,7 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
     {
       "boxCode": "72444",
       "dims": "1150×570×650",
-      "products": 15,
+      "products": 14,
     },
     {
       "boxCode": "69498",
@@ -94,13 +94,13 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "products": 9,
     },
     {
-      "boxCode": "74041",
-      "dims": "1000×600×350",
-      "products": 8,
-    },
-    {
       "boxCode": "69496",
       "dims": "1000×600×130",
+      "products": 7,
+    },
+    {
+      "boxCode": "74041",
+      "dims": "1000×600×350",
       "products": 7,
     },
     {
@@ -111,11 +111,6 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
     {
       "boxCode": "72543",
       "dims": "1100×650×270",
-      "products": 5,
-    },
-    {
-      "boxCode": "74042",
-      "dims": "1000×600×450",
       "products": 5,
     },
     {
@@ -134,14 +129,19 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "products": 5,
     },
     {
-      "boxCode": "74044",
-      "dims": "1140×570×650",
+      "boxCode": "74042",
+      "dims": "1000×600×450",
       "products": 4,
     },
     {
       "boxCode": "77288",
       "dims": "2250×380×180",
       "products": 4,
+    },
+    {
+      "boxCode": "74044",
+      "dims": "1140×570×650",
+      "products": 3,
     },
     {
       "boxCode": "74681",
@@ -169,8 +169,8 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "family": "SILO_BAG",
       "name": "Silo-bolsa",
       "pending": 25,
-      "total": 229,
-      "withPackaging": 204,
+      "total": 209,
+      "withPackaging": 184,
     },
     {
       "family": "SILAGE_TARP",
@@ -225,7 +225,7 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
   "byLine": [
     {
       "line": "Silo-bolsa",
-      "total": 197,
+      "total": 180,
     },
     {
       "line": "Lona BigSafe",
@@ -248,12 +248,12 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "total": 18,
     },
     {
-      "line": "Silo-bolsa Probag",
-      "total": 17,
-    },
-    {
       "line": "Silo-bolsa Ecobag",
       "total": 15,
+    },
+    {
+      "line": "Silo-bolsa Probag",
+      "total": 14,
     },
     {
       "line": "Filme BPF",
@@ -305,22 +305,22 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
     },
   ],
   "confidence": {
-    "HIGH": 199,
-    "MEDIUM": 171,
+    "HIGH": 180,
+    "MEDIUM": 170,
   },
   "deactivations": 152,
-  "duplicateGroups": 90,
-  "duplicatesDiscarded": 111,
+  "duplicateGroups": 98,
+  "duplicatesDiscarded": 131,
   "ean": {
-    "EAN13": 530,
+    "EAN13": 511,
     "GTIN14": 15,
-    "INVALID": 11,
+    "INVALID": 10,
     "missing": 2,
   },
   "familiesWithoutActiveProducts": [
     "Animal Comfort",
   ],
-  "grossReplaced": 128,
+  "grossReplaced": 118,
   "newFamilies": [
     "Filmes em rolo",
     "Hidropeso",
@@ -339,12 +339,12 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
   ],
   "parsedRows": 667,
   "pending": 188,
-  "planned": 558,
-  "refPalletsEstimate": 370,
+  "planned": 538,
+  "refPalletsEstimate": 350,
   "sheetRows": 667,
   "skippedRows": 0,
-  "toCreate": 558,
+  "toCreate": 538,
   "toUpdate": 0,
-  "withPackaging": 370,
+  "withPackaging": 350,
 }
 `;

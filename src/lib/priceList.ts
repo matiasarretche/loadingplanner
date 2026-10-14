@@ -1,6 +1,7 @@
 import 'server-only'
 import { and, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '@/db'
+import { compareCatalogOrder } from '@/domain/catalogOrder'
 import { diameterFtOf, quotePrice } from '@/domain/exportPricing'
 import { loadPricingConfig } from './exportPricing'
 
@@ -77,11 +78,13 @@ type CatalogRow = Awaited<ReturnType<typeof catalogRows>>[number]
 
 const attrsOf = (r: CatalogRow) => (r.v.attrs ?? {}) as Record<string, unknown>
 const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null)
-/** largura para ordenar; o silo-bolsa não tem largura, usa o diâmetro (campo em pés → m; attrs.diametro_m só como legado) */
-const widthKey = (r: CatalogRow) => r.v.widthM ?? (r.v.diameterFt != null ? r.v.diameterFt * 0.3048 : num(attrsOf(r).diametro_m)) ?? 0
-/** largura, capacidade, comprimento, código */
-const byCatalogOrder = (a: CatalogRow, b: CatalogRow) =>
-  widthKey(a) - widthKey(b) || (num(attrsOf(a).capacidade_l) ?? 0) - (num(attrsOf(b).capacidade_l) ?? 0) || (a.v.lengthM ?? 0) - (b.v.lengthM ?? 0) || a.v.sku.localeCompare(b.v.sku)
+/** largura para ordenar; o silo-bolsa não tem largura, usa o diâmetro (o mesmo da faixa de preço e do subtítulo "9 pés") */
+const widthKey = (r: CatalogRow) => r.v.widthM ?? (diameterFtOf(r.v) ?? 0) * 0.3048
+/** comprimento em metros (o silo-bolsa cadastrado só em pés entra convertido) */
+const lengthKey = (r: CatalogRow) => r.v.lengthM ?? (r.v.lengthFt != null ? r.v.lengthFt * 0.3048 : null)
+const orderKey = (r: CatalogRow) => ({ widthM: widthKey(r), lengthM: lengthKey(r), thicknessUm: r.v.thicknessUm, capacityL: num(attrsOf(r).capacidade_l), name: r.v.name, sku: r.v.sku })
+/** largura, comprimento, espessura (domain/catalogOrder) */
+const byCatalogOrder = (a: CatalogRow, b: CatalogRow) => compareCatalogOrder(orderKey(a), orderKey(b))
 const mLabel = (w: number) => `${String(w).replace('.', ',')} m`
 const ftLabel = (ft: number) => `${String(ft).replace('.', ',')} pés`
 
@@ -150,7 +153,7 @@ export async function priceListData(o: { families: string[]; skus?: string[] | n
     if (!groups.has(key)) groups.set(key, { family: r.family, label, widthM: label ? v.widthM : null, rows: [] })
     groups.get(key)!.rows.push(row)
   }
-  // ordem: família, largura (as linhas já vêm na ordem do catálogo: largura, capacidade, comprimento)
+  // ordem: família, largura (as linhas já vêm na ordem do catálogo: largura, comprimento, espessura)
   const list = [...groups.values()].sort((a, b) => a.family.localeCompare(b.family, 'pt-BR') || parseFloat(a.label.replace(',', '.') || '0') - parseFloat(b.label.replace(',', '.') || '0'))
   return { category: { id: cat.id, name: cat.name }, incoterm: o.incoterm, agent: agent ? { id: agent.id, name: agent.name } : null, groups: list, generatedAt: new Date() }
 }

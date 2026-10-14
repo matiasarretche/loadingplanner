@@ -394,7 +394,24 @@ function Produtos({ id, plan, famName, familia, q, page, href }: { id: number; p
                     <EanCell p={p} />
                   </td>
                   <td className="num">
+                    {/* pendente: a importação não grava peso — o par fica o da planilha (como na planilha dos pendentes) */}
                     {n2(pk?.netKg ?? p.source.netKg)} / {n2(pk?.grossKg ?? p.source.grossKg)}
+                    {pk?.netSource === 'REAL_PERIMETER' && (
+                      <>
+                        <br />
+                        <span className="badge INFO" title={`Líquido pelo perímetro real × comprimento × espessura × 0,932 g/cm³ (planilha: ${n2(p.source.netKg)} kg)`}>
+                          perímetro real
+                        </span>
+                      </>
+                    )}
+                    {!pk && p.calcNetKg != null && (
+                      <>
+                        <br />
+                        <span className="badge INFO" title="Pendente: a importação não grava peso. Ao definir a caixa no Catálogo, grava este líquido pelo perímetro real × comprimento × espessura × 0,932 g/cm³ (bruto = líquido + tara).">
+                          perímetro real: {n2(p.calcNetKg)}
+                        </span>
+                      </>
+                    )}
                     {pk?.grossSource === 'NET_PLUS_BOX_TARE' && (
                       <>
                         <br />
