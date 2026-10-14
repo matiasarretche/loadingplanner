@@ -93,11 +93,11 @@ describe('classificação', () => {
     expect(mapBrand('EXT. B', DEFAULT_DECISIONS)).toEqual({ brand: 'Pacifil', known: true })
     expect(mapBrand('AGRO MAX', DEFAULT_DECISIONS)).toEqual({ brand: 'Agro Max', known: false })
   })
-  it('linhas de lona pelo grupo e pelo nome (decisão 4: grupo BPF = Lona BPF; "BPF 8X50" do grupo SILO PLASTICO/RESERV = Lona padrão)', () => {
-    expect(ok({ group: 'SILO PLAS/RESERV BPF', measure: '8MX50M', thickness: '150MIC' }).lineKey).toBe('TARP_BPF')
+  it('linhas de lona pelo grupo e pelo nome (decisão 4: grupo BPF = Lona padrão, exportação; "BPF 8X50" do grupo SILO PLASTICO/RESERV = Lona BPF)', () => {
+    expect(ok({ group: 'SILO PLAS/RESERV BPF', measure: '8MX50M', thickness: '150MIC' }).lineKey).toBe('TARP_STD')
     expect(ok({ group: 'SILO PLAS/RESERV BPF PLUS', measure: '14MX50M', thickness: '120MIC' }).lineKey).toBe('TARP_PLUS')
-    expect(ok({ group: 'SILO PLASTICO/RESERV', measure: 'BPF 8X50', thickness: '125 MICRAS' }).lineKey).toBe('TARP_STD')
-    expect(ok({ group: 'SILO PLASTICO/RESERV', measure: 'BPF 8X50 ECOBAG 110', thickness: '110 MICRAS', brand: 'ECOBAG' }).lineKey).toBe('TARP_STD')
+    expect(ok({ group: 'SILO PLASTICO/RESERV', measure: 'BPF 8X50', thickness: '125 MICRAS' }).lineKey).toBe('TARP_BPF')
+    expect(ok({ group: 'SILO PLASTICO/RESERV', measure: 'BPF 8X50 ECOBAG 110', thickness: '110 MICRAS', brand: 'ECOBAG' }).lineKey).toBe('TARP_BPF')
     expect(ok({ group: 'SILO PLASTICO/RESERV', measure: 'BPF PLUS X3 10X100', thickness: '125 MICRAS' }).lineKey).toBe('TARP_BPF_PLUSX3')
     expect(ok({ group: 'SILO PLASTICO/RESERV', measure: 'BIGSILOPLUSX3 28X100', thickness: '125 MICRAS' }).lineKey).toBe('TARP_BIGSILO_PLUSX3')
     expect(ok({ group: 'PROTECAO PLAST MULTICAMADAS', measure: 'BIGFORT 8,60X40', thickness: '500 MICRAS' }).lineKey).toBe('TARP_BIGFORT')

@@ -5,7 +5,7 @@
  */
 import type { ImportDecisions } from './decisions'
 
-export const ENGINE_VERSION = '2026-10-13.3'
+export const ENGINE_VERSION = '2026-10-14.1'
 export type Confidence = 'HIGH' | 'MEDIUM' | 'LOW'
 export type EanStatus = 'EAN13' | 'GTIN14' | 'INVALID'
 export type FamilyKey = 'SILO_BAG' | 'SILAGE_TARP' | 'HIDROSILO' | 'HYDROFORCE' | 'SILAGE_BAG' | 'ACCESSORY' | 'FILM_ROLL' | 'HIDROPESO'

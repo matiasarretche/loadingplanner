@@ -57,12 +57,28 @@ export type TarpGroupLine = {
   multilayer: LineKey
 }
 
+/** Produto FORA da planilha oficial, criado por decisão: lido pelo mesmo motor (nome, linha, caixa, bruto). */
+export interface ExtraProduct {
+  /** SKU do produto (não é um código da fábrica) */
+  sku: string
+  /** grupo, medida, espessura e marca escritos como na planilha */
+  group: string
+  measure: string
+  thickness: string
+  brand: string
+  netKg: number
+  /** origem do peso / do pedido: vai para as observações do cadastro */
+  note: string
+}
+
 export interface ImportDecisions {
   id: string
   /** marca da planilha (coluna E, maiúsculas) → marca do catálogo */
   brandMap: Record<string, string>
   /** SKUs atuais que continuam ativos mesmo fora da planilha */
   keepActiveSkus: string[]
+  /** produtos que não estão na planilha e entram na importação (o SKU dado é o código) */
+  extraProducts: ExtraProduct[]
   /** acompanhantes obrigatórios por família (atributos acessorio_sku / acessorio_qtd) */
   companionRules: { family: FamilyKey; sku: string; qty: number }[]
   families: Record<FamilyKey, { code: string; name: string }>
@@ -118,9 +134,17 @@ const BIG: BoxLine[] = ['BIGSAFE']
 const BIGSILO: BoxLine[] = ['BIGSILO']
 
 export const DEFAULT_DECISIONS: ImportDecisions = {
-  id: '2026-10-13-matias',
+  id: '2026-10-14-matias',
   brandMap: { PACIFIL: 'Pacifil', ECOBAG: 'Ecobag', PROBAG: 'Probag', FITA: 'Pacifil', 'EXT. B': 'Pacifil' },
-  keepActiveSkus: ['KIT-HF'],
+  // 14/10/2026 (lista de silo-bolsas Venezuela / representante Flavinho): os 6 pés × 75 e × 100 m × 180 µm não estão
+  // na planilha — continuam ativos com o peso e a caixa atuais até o Matías passar o código da fábrica
+  keepActiveSkus: ['KIT-HF', 'SB-PAC-6X75-180', 'SB-PAC-6X100-180'],
+  // 14/10/2026 (mesma lista): 10 pés × 100 m e × 60 m × 235 µm não existem na planilha. Peso líquido ESTIMADO a
+  // 2,132 kg/m, o mesmo do 19528 (10 × 75 m × 235 µm = 159,9 kg) e do 19530 (10 × 90 m × 235 µm = 191,9 kg)
+  extraProducts: [
+    { sku: 'SB-PAC-10X100-235', group: 'SILO PLAS/RESERV SBG', measure: '10PESX100M', thickness: '235MIC', brand: 'PACIFIL', netKg: 213.2, note: 'fora da planilha oficial (pedido do Matías, 14/10/2026): peso líquido ESTIMADO 213,2 kg = 2,132 kg/m (19528 / 19530) — confirmar o peso real' },
+    { sku: 'SB-PAC-10X60-235', group: 'SILO PLAS/RESERV SBG', measure: '10PESX60M', thickness: '235MIC', brand: 'PACIFIL', netKg: 127.9, note: 'fora da planilha oficial (pedido do Matías, 14/10/2026): peso líquido ESTIMADO 127,9 kg = 2,132 kg/m (19528 / 19530) — confirmar o peso real' },
+  ],
   companionRules: [{ family: 'HYDROFORCE', sku: 'KIT-HF', qty: 1 }],
   families: {
     SILO_BAG: { code: 'SILO_BAG', name: 'Silo-bolsa' },
@@ -159,11 +183,11 @@ export const DEFAULT_DECISIONS: ImportDecisions = {
     TAPE_BUTYL: { family: 'ACCESSORY', productLine: 'Fita de butil', namePrefix: 'Fita de butil', boxLines: [], secondaryBoxLines: [] },
     PATCH: { family: 'ACCESSORY', productLine: 'Adesivo de reparo', namePrefix: 'Adesivo de reparo Hidrosilo em PVC', boxLines: [], secondaryBoxLines: [] },
   },
-  // decisão 4: grupo "SILO PLAS/RESERV BPF" = Lona BPF (mercado interno); as lonas dos OUTROS grupos = Lona padrão
-  // (exportação) — inclusive os nomes "BPF 8X50…" do grupo SILO PLASTICO/RESERV: é a outra série, com o mesmo
-  // peso (só muda o formato, aberta × tubular). As duas séries nunca podem cair na mesma linha (a exportação
-  // ficaria sem Lona padrão: ver o bloqueio LONA_RULE_EXPORT em plan.ts). Para inverter, troque os dois valores.
-  tarpGroupLine: { 'SILO PLAS/RESERV BPF': 'TARP_BPF', 'SILO PLAS/RESERV BPF PLUS': 'TARP_PLUS', namedBpfPrefix: 'TARP_STD', otherPlain: 'TARP_STD', multilayer: 'TARP_BIGSAFE' },
+  // decisão 4 (confirmada pelo Matías em 14/10/2026 com o exemplo 19675 "8MX50M"): o grupo "SILO PLAS/RESERV BPF"
+  // é a Lona padrão de EXPORTAÇÃO; os nomes "BPF 8X50…" do grupo SILO PLASTICO/RESERV são a outra série (mesmo
+  // peso, só muda o formato: aberta × tubular) = Lona BPF, mercado interno. As duas séries nunca podem cair na
+  // mesma linha (a exportação ficaria sem Lona padrão: ver o bloqueio LONA_RULE_EXPORT em plan.ts).
+  tarpGroupLine: { 'SILO PLAS/RESERV BPF': 'TARP_STD', 'SILO PLAS/RESERV BPF PLUS': 'TARP_PLUS', namedBpfPrefix: 'TARP_BPF', otherPlain: 'TARP_STD', multilayer: 'TARP_BIGSAFE' },
   thinFilmMaxUm: 80,
   filmGroup: 'SILO PLAS/RESERV',
   // decisão 12: o "2,00X1,20" da planilha é o palete doble que o programa já usa

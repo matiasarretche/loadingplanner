@@ -40,7 +40,8 @@ describe('plano: cabeçalho e invariantes', () => {
     const s = plan.summary
     expect(s.withPackaging + s.pending).toBe(s.planned)
     expect(plan.pending).toHaveLength(s.pending)
-    expect(s.planned + s.duplicatesDiscarded).toBe(s.parsedRows)
+    // + os produtos fora da planilha (decisão extraProducts)
+    expect(s.planned + s.duplicatesDiscarded).toBe(s.parsedRows + DEFAULT_DECISIONS.extraProducts.length)
     for (const p of plan.products) {
       if (!p.packaging) {
         expect(pend(p.code)).toBeTruthy()
@@ -56,9 +57,10 @@ describe('plano: cabeçalho e invariantes', () => {
   it('é determinístico', () => {
     expect(JSON.stringify(buildImportPlan(input()))).toBe(JSON.stringify(plan))
   })
-  it('SKU = código oficial em texto; atributos só texto ou número', () => {
+  it('SKU = código oficial em texto (ou o SKU dado ao produto fora da planilha); atributos só texto ou número', () => {
+    const extras = new Set(DEFAULT_DECISIONS.extraProducts.map((x) => x.sku))
     for (const p of plan.products) {
-      expect(p.code).toMatch(/^\d{5}$/)
+      expect(p.code).toMatch(extras.has(p.code) ? /^SB-PAC-/ : /^\d{5}$/)
       for (const v of Object.values(p.attrs)) expect(v === null || typeof v === 'string' || typeof v === 'number').toBe(true)
     }
   })
@@ -102,14 +104,14 @@ describe('classificação e nomes (decisões 3, 4, 5, 6)', () => {
     expect(P('17751')).toMatchObject({ family: 'HIDROPESO', name: 'Hidropeso 1,5 × 0,3 m × 500 µm' })
     expect(P('17607')).toMatchObject({ family: 'SILAGE_BAG', name: 'Bolsa para silagem 2 × 3 m × 125 µm — caixa c/50 un' })
   })
-  it('lonas: grupo BPF = Lona BPF, "BPF 8X50" do grupo SILO PLASTICO/RESERV e SBG em metros = Lona padrão, BPF PLUS = Lona Plus, multicamadas = BigSafe', () => {
-    expect(P('19712')).toMatchObject({ lineKey: 'TARP_BPF', productLine: 'Lona BPF', name: 'Lona BPF 8 × 50 m × 150 µm (natural)', attrs: { acabamento: 'natural', formato: 'rolo' } })
+  it('lonas: grupo BPF e SBG em metros = Lona padrão (exportação), "BPF 8X50" do grupo SILO PLASTICO/RESERV = Lona BPF, BPF PLUS = Lona Plus, multicamadas = BigSafe', () => {
+    expect(P('19712')).toMatchObject({ lineKey: 'TARP_STD', productLine: 'Lona padrão', name: 'Lona padrão 8 × 50 m × 150 µm (natural)', attrs: { acabamento: 'natural', formato: 'rolo' } })
     expect(P('19771')).toMatchObject({ lineKey: 'TARP_STD', productLine: 'Lona padrão', name: 'Lona padrão 8 × 100 m × 120 µm' })
     expect(P('19894')).toMatchObject({ lineKey: 'TARP_PLUS', productLine: 'Lona Plus (LP)', name: 'Lona Plus 14 × 50 m × 120 µm' })
-    expect(P('19867').name).toBe('Lona padrão Ecobag 8 × 50 m × 110 µm')
+    expect(P('19867').name).toBe('Lona BPF Ecobag 8 × 50 m × 110 µm')
     // as duas séries de mesma medida e peso (aberta × tubular) ficam em linhas diferentes, com nomes diferentes
-    expect(P('14412')).toMatchObject({ lineKey: 'TARP_STD', productLine: 'Lona padrão', name: 'Lona padrão 8 × 50 m × 125 µm' })
-    expect(P('19675')).toMatchObject({ lineKey: 'TARP_BPF', productLine: 'Lona BPF', name: 'Lona BPF 8 × 50 m × 125 µm' })
+    expect(P('14412')).toMatchObject({ lineKey: 'TARP_BPF', productLine: 'Lona BPF', name: 'Lona BPF 8 × 50 m × 125 µm' })
+    expect(P('19675')).toMatchObject({ lineKey: 'TARP_STD', productLine: 'Lona padrão', name: 'Lona padrão 8 × 50 m × 125 µm' })
     expect(P('17774')).toMatchObject({ productLine: 'Lona BigSafe', name: 'Lona BigSafe 16 × 50 m × 125 µm' })
     expect(P('17765')).toMatchObject({ family: 'SILAGE_TARP', productLine: 'Lona BigSafe', name: 'Lona BigSafe 2,3 × 100 m × 240 µm' })
     expect(P('19934').name).toBe('Lona Big Silo Plus X3 24 × 50 m × 125 µm')
@@ -120,10 +122,11 @@ describe('classificação e nomes (decisões 3, 4, 5, 6)', () => {
   it('os nomes continuam funcionando com a regra das lonas', () => {
     expect(isRuleLona(P('19712').name)).toBe(true)
     expect(lonaWidthM(P('19867').name)).toBe(8)
-    expect(allowedByLonaRule(P('19712').name, 'EXPORT')).toBe(false)
+    expect(allowedByLonaRule(P('19712').name, 'EXPORT')).toBe(true)
     expect(allowedByLonaRule(P('19771').name, 'EXPORT')).toBe(true)
-    expect(allowedByLonaRule(P('14412').name, 'EXPORT')).toBe(true)
-    expect(allowedByLonaRule(P('19675').name, 'DOMESTIC')).toBe(true)
+    expect(allowedByLonaRule(P('19675').name, 'EXPORT')).toBe(true)
+    expect(allowedByLonaRule(P('14412').name, 'EXPORT')).toBe(false)
+    expect(allowedByLonaRule(P('14412').name, 'DOMESTIC')).toBe(true)
     expect(isRuleLona(P('17774').name)).toBe(false)
   })
   it('silo-bolsa e reservatórios no formato atual; EXT. B vira Pacifil', () => {
@@ -163,6 +166,10 @@ describe('repetidos (decisão 10)', () => {
     ])
       expect(discardedFor(c)?.keptCode).toBe(kept)
     expect(discardedFor('17500')?.reason).toContain('escrito de outro jeito')
+  })
+  it('lona do grupo SBG (erro de cadastro) é repetido da Lona padrão igual do grupo BPF: fica o código mais recente', () => {
+    expect(plan.discarded.find((x) => x.code === '17367')).toMatchObject({ keptCode: '19771' })
+    expect(plan.discarded.find((x) => x.code === '17367')?.reason).toContain('outro grupo da planilha')
   })
   it('as duas séries de lona (grupo BPF × "BPF 8X50") NÃO são repetidos: as duas ficam, com nomes diferentes', () => {
     expect(P('19675').name).not.toBe(P('14412').name)
@@ -219,14 +226,18 @@ describe('pesos (decisão 7)', () => {
 
 describe('caixas atribuídas (decisões 11–18 e verificação)', () => {
   it('lonas', () => {
-    expect(pk('14412')).toMatchObject({ boxCode: '75913', confidence: 'HIGH', palletTypeCode: 'PBR-1', unitsPerPallet: 20, palletSource: 'CATALOG' })
-    expect(pk('19675')).toMatchObject({ boxCode: '69496', confidence: 'HIGH', palletTypeCode: 'PBR-1', unitsPerPallet: 20, palletSource: 'CATALOG' })
+    // a caixa segue a linha da tabela de caixas: fila "BPF 4X100, 8X50" (69496) = Lona BPF; fila sem linha (75913) = Lona padrão
+    expect(pk('14412')).toMatchObject({ boxCode: '69496', confidence: 'HIGH', palletTypeCode: 'PBR-1', unitsPerPallet: 20, palletSource: 'CATALOG' })
+    expect(pk('19675')).toMatchObject({ boxCode: '75913', confidence: 'HIGH', palletTypeCode: 'PBR-1', unitsPerPallet: 20, palletSource: 'CATALOG' })
     expect(pk('19712')).toMatchObject({ boxCode: '69493', palletTypeCode: 'PBR-1', unitsPerPallet: 12 })
     expect(P('19712').match?.sku).toBe('LS-PAC-8X50-150-STD')
-    expect(pk('19676')).toMatchObject({ boxCode: '69493', confidence: 'HIGH' })
+    // Lona padrão 10 × 50 × 125 (58 kg) passa da faixa da fila padrão: caixa da fila BPF, confiança média
+    expect(pk('19676')).toMatchObject({ boxCode: '69493', confidence: 'MEDIUM' })
     expect(pk('14413')).toMatchObject({ boxCode: '70328', confidence: 'MEDIUM' })
     expect(pk('17774')).toMatchObject({ boxCode: '74645', lengthMm: 1600, widthMm: 364, heightMm: 337, confidence: 'HIGH', palletTypeCode: 'PCF-1150-DUPLO', unitsPerPallet: 9 })
-    expect(pk('19655')).toMatchObject({ boxCode: '69493', confidence: 'MEDIUM' })
+    // Lona padrão 8 × 50 × 200 µm (75 kg): a fila padrão não tem caixa para esse peso → pendente
+    expect(P('19655').packaging).toBeNull()
+    expect(pend('19655')).toBeDefined()
     expect(pk('17759').boxCode).toBe('69499')
   })
   it('Big Silo 18 × 50 m: caixa 74645 no palete duplo, como o 16 e o 20 × 50 (decisão 12), mesmo com o equivalente na caixa 72543', () => {
@@ -239,7 +250,7 @@ describe('caixas atribuídas (decisões 11–18 e verificação)', () => {
   it('lonas pendentes com a sugestão da verificação', () => {
     expect(P('19658').packaging).toBeNull()
     expect(pend('19658')?.suggestion?.boxCode).toBe('70328')
-    for (const c of ['19672', '19659', '17367']) expect(pend(c)?.suggestion?.boxCode).toBe('70328')
+    for (const c of ['19672', '19659', '19771']) expect(pend(c)?.suggestion?.boxCode).toBe('70328')
     expect(pend('19672')?.reasonCode).toBe('TARP_OVER_100KG')
     expect(pend('19916')?.reasonCode).toBe('TARP_OVER_100KG')
     expect(pend('17446')).toMatchObject({ reasonCode: 'PACK_UNITS', unitsPerPackHint: 3 })
@@ -292,8 +303,8 @@ describe('caixas atribuídas (decisões 11–18 e verificação)', () => {
     expect(pend('17416')?.reasonCode).toBe('NO_NET_WEIGHT')
   })
   it('caixa da tabela vira atributo codigo_caixa; verificado só com a mesma caixa e o mesmo peso', () => {
-    expect(P('14412').attrs.codigo_caixa).toBe('75913')
-    expect(P('19675').attrs.codigo_caixa).toBe('69496')
+    expect(P('14412').attrs.codigo_caixa).toBe('69496')
+    expect(P('19675').attrs.codigo_caixa).toBe('75913')
     expect(P('18137').attrs.codigo_caixa).toBeUndefined()
     expect(pk('18137').verification).toBe('VERIFIED')
     expect(pk('18010').verification).toBe('VERIFIED')
@@ -305,25 +316,29 @@ describe('equivalentes no catálogo atual', () => {
   it('correções V.2.2 e V.3 sem exceções por código', () => {
     expect(P('16670').match).toMatchObject({ sku: 'SB-PAC-9X75-254' })
     expect(P('16669').match).toMatchObject({ sku: 'SB-PAC-9X60-254' })
-    expect(P('14412').match).toMatchObject({ sku: 'LS-PAC-8X50-125-STD', confidence: 'HIGH', lineRelation: 'SAME' })
-    expect(P('14412').attrs.codigo_anterior).toBe('LS-PAC-8X50-125-STD')
-    expect(P('19675').match).toMatchObject({ sku: 'LS-PAC-8X50-125-BPF', confidence: 'HIGH', lineRelation: 'SAME' })
+    expect(P('14412').match).toMatchObject({ sku: 'LS-PAC-8X50-125-BPF', confidence: 'HIGH', lineRelation: 'SAME' })
+    expect(P('14412').attrs.codigo_anterior).toBe('LS-PAC-8X50-125-BPF')
+    expect(P('19675').match).toMatchObject({ sku: 'LS-PAC-8X50-125-STD', confidence: 'HIGH', lineRelation: 'SAME' })
     expect(P('17765').match).toMatchObject({ sku: 'AC-PAC-2.3X100-240', lineRelation: 'COMPATIBLE' })
   })
-  it('tudo é criado com o código novo; os atuais saem, menos o KIT-HF', () => {
+  it('tudo é criado com o código novo; os atuais saem, menos o KIT-HF e os silo-bolsas 6 pés mantidos por decisão', () => {
     const active = FIXTURE_CURRENT.variants.filter((v) => v.active).map((v) => v.sku)
+    const kept = ['KIT-HF', 'SB-PAC-6X75-180', 'SB-PAC-6X100-180']
     expect(plan.summary.toCreate).toBe(plan.summary.planned)
-    expect(plan.deactivations.variants.map((v) => v.sku).sort()).toEqual(active.filter((s) => s !== 'KIT-HF').sort())
-    expect(plan.deactivations.keptActive.map((k) => k.sku)).toEqual(['KIT-HF'])
-    expect(plan.deactivations.variants.find((v) => v.sku === 'LS-PAC-8X50-125-BPF')?.replacedBy).toContain('19675')
-    // a exportação não perde a Lona padrão: os SKUs "-STD" de 125 µm têm substituto na Lona padrão
-    for (const [sku, code] of [
-      ['LS-PAC-8X50-125-STD', '14412'],
-      ['LS-PAC-4X100-125-STD', '14409'],
-      ['LS-PAC-6X25-125-STD', '18359'],
-      ['LS-PAC-12X50-125-STD', '14416'],
-    ])
-      expect(plan.deactivations.variants.find((v) => v.sku === sku)?.replacedBy).toContain(code)
+    expect(plan.deactivations.variants.map((v) => v.sku).sort()).toEqual(active.filter((s) => !kept.includes(s)).sort())
+    expect(plan.deactivations.keptActive.map((k) => k.sku)).toEqual(kept)
+    expect(plan.deactivations.keptActive.find((k) => k.sku === 'SB-PAC-6X100-180')?.reason).toContain('fora da planilha oficial')
+    // o recorte do catálogo não tem o 6 × 75: avisado
+    expect(plan.warnings.find((w) => w.code === 'KEEP_ACTIVE_MISSING')?.codes).toEqual(['SB-PAC-6X75-180'])
+    expect(plan.deactivations.variants.find((v) => v.sku === 'LS-PAC-8X50-125-BPF')?.replacedBy).toContain('14412')
+    // a Lona padrão 8 × 50 × 125 tem substituto na Lona padrão (grupo BPF); as medidas que a planilha só tem
+    // como "BPF 4X100…" (Lona BPF, mercado interno) ficam sem substituto e entram no aviso da prévia
+    expect(plan.deactivations.variants.find((v) => v.sku === 'LS-PAC-8X50-125-STD')?.replacedBy).toContain('19675')
+    const noRepl = plan.warnings.find((w) => w.code === 'LONA_EXPORT_NO_REPLACEMENT')?.codes ?? []
+    for (const sku of ['LS-PAC-4X100-125-STD', 'LS-PAC-6X25-125-STD', 'LS-PAC-12X50-125-STD']) {
+      expect(plan.deactivations.variants.find((v) => v.sku === sku)?.replacedBy).toEqual([])
+      expect(noRepl).toContain(sku)
+    }
   })
 })
 
@@ -343,11 +358,12 @@ describe('famílias, linhas e avisos', () => {
     expect(codes).toEqual(expect.arrayContaining(['DUPLICATES', 'GROSS_REPLACED', 'HF_COMPANION', 'FAMILY_EMPTY', 'PALLET_FROM_SHEET', 'LONA_EXPORT_NO_REPLACEMENT']))
     expect(codes).not.toContain('LONA_RULE_EXPORT')
     expect(plan.warnings.some((w) => w.level === 'BLOCKER')).toBe(false)
-    // as Lonas padrão de 150 µm do catálogo atual só têm equivalente na Lona BPF (grupo BPF): avisado na prévia
-    expect(plan.warnings.find((w) => w.code === 'LONA_EXPORT_NO_REPLACEMENT')?.codes).toContain('LS-PAC-8X50-150-STD')
+    // Lonas padrão do catálogo atual cuja medida só existe na planilha como "BPF 4X100…" (Lona BPF): avisado na prévia
+    expect(plan.warnings.find((w) => w.code === 'LONA_EXPORT_NO_REPLACEMENT')?.codes).toContain('LS-PAC-4X100-125-STD')
+    expect(plan.warnings.find((w) => w.code === 'LONA_EXPORT_NO_REPLACEMENT')?.codes).not.toContain('LS-PAC-8X50-150-STD')
   })
   it('as duas séries de lona na mesma linha (exportação sem Lona padrão) bloqueiam a importação', () => {
-    const d = { ...DEFAULT_DECISIONS, tarpGroupLine: { ...DEFAULT_DECISIONS.tarpGroupLine, namedBpfPrefix: 'TARP_BPF' as const } }
+    const d = { ...DEFAULT_DECISIONS, tarpGroupLine: { ...DEFAULT_DECISIONS.tarpGroupLine, 'SILO PLAS/RESERV BPF': 'TARP_BPF' as const } }
     const pl = buildImportPlan(input({ decisions: d }))
     expect(pl.warnings.find((w) => w.code === 'LONA_RULE_EXPORT')).toMatchObject({ level: 'BLOCKER' })
   })
@@ -360,12 +376,14 @@ describe('famílias, linhas e avisos', () => {
     const pl = buildImportPlan(input({ products: [...FIXTURE_PRODUCT_ROWS, { ...FIXTURE_PRODUCT_ROWS[0], row: 999, measure: '20CM X 15CM' }] }))
     expect(pl.warnings.find((w) => w.code === 'DUPLICATE_CODE')).toMatchObject({ level: 'BLOCKER' })
   })
-  it('as séries podem ser invertidas mudando a decisão (grupo BPF = Lona padrão, "BPF 8X50" = Lona BPF)', () => {
-    const d = { ...DEFAULT_DECISIONS, tarpGroupLine: { ...DEFAULT_DECISIONS.tarpGroupLine, 'SILO PLAS/RESERV BPF': 'TARP_STD' as const, namedBpfPrefix: 'TARP_BPF' as const } }
+  it('as séries podem ser invertidas mudando a decisão (grupo BPF = Lona BPF, "BPF 8X50" = Lona padrão)', () => {
+    const d = { ...DEFAULT_DECISIONS, tarpGroupLine: { ...DEFAULT_DECISIONS.tarpGroupLine, 'SILO PLAS/RESERV BPF': 'TARP_BPF' as const, namedBpfPrefix: 'TARP_STD' as const } }
     const pl = buildImportPlan(input({ decisions: d }))
-    expect(P('19712', pl)).toMatchObject({ lineKey: 'TARP_STD', name: 'Lona padrão 8 × 50 m × 150 µm (natural)' })
-    expect(P('19712', pl).match).toMatchObject({ sku: 'LS-PAC-8X50-150-STD', lineRelation: 'SAME' })
-    expect(P('14412', pl)).toMatchObject({ lineKey: 'TARP_BPF', name: 'Lona BPF 8 × 50 m × 125 µm' })
+    expect(P('19712', pl)).toMatchObject({ lineKey: 'TARP_BPF', name: 'Lona BPF 8 × 50 m × 150 µm (natural)' })
+    expect(P('14412', pl)).toMatchObject({ lineKey: 'TARP_STD', name: 'Lona padrão 8 × 50 m × 125 µm' })
+    expect(P('14412', pl).match).toMatchObject({ sku: 'LS-PAC-8X50-125-STD', lineRelation: 'SAME' })
+    // invertido, a lona do grupo SBG já não cai na linha do grupo BPF: as duas 8 × 100 × 120 ficam (nomes diferentes)
+    expect(pl.discarded.find((x) => x.code === '17367')).toBeUndefined()
     expect(pl.warnings.some((w) => w.level === 'BLOCKER')).toBe(false)
   })
 })
@@ -420,7 +438,7 @@ describe('reimportação (mesmo código)', () => {
       expect(x.packaging?.unitsPerPallet).toBe(before.unitsPerPallet)
       expect([x.packaging?.lengthMm, x.packaging?.widthMm, x.packaging?.heightMm]).toEqual([before.lengthMm, before.widthMm, before.heightMm])
     }
-    expect(P('14412', again).attrs.codigo_anterior).toBe('LS-PAC-8X50-125-STD')
+    expect(P('14412', again).attrs.codigo_anterior).toBe('LS-PAC-8X50-125-BPF')
   })
   it('reimportar sobre um palete gravado errado (mesma caixa) corrige pelo da tabela', () => {
     // como a importação anterior gravou 19595: caixa 69491 no PCF-1150 × 8 (1 por camada × 8 = 4 m)
@@ -428,5 +446,32 @@ describe('reimportação (mesmo código)', () => {
     const fixed = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...old, ...bad] } }))
     expect(P('19595', fixed).packaging).toMatchObject({ boxCode: '69491', palletTypeCode: 'PBR-1', unitsPerPallet: 8, palletSource: 'SHEET' })
     expect(P('19595', fixed).packaging?.palletNote).toContain('não serve com a caixa 69491')
+  })
+})
+
+describe('produtos fora da planilha (decisão extraProducts, 14/10/2026)', () => {
+  it('silo-bolsas 10 pés × 100 m e × 60 m × 235 µm: mesmo motor (nome, linha, caixa), SKU dado e peso estimado nas observações', () => {
+    expect(P('SB-PAC-10X100-235')).toMatchObject({ action: 'CREATE', family: 'SILO_BAG', lineKey: 'SB_STD', brand: 'Pacifil', name: 'Silo-bolsa 10 pés × 100 m × 235 µm', diameterFt: 10, lengthM: 100, thicknessUm: 235 })
+    expect(P('SB-PAC-10X60-235')).toMatchObject({ name: 'Silo-bolsa 10 pés × 60 m × 235 µm', lengthM: 60 })
+    expect(pk('SB-PAC-10X100-235')).toMatchObject({ netKg: 213.2, boxCode: '74043', grossSource: 'NET_PLUS_BOX_TARE' })
+    expect(pk('SB-PAC-10X60-235').netKg).toBe(127.9)
+    for (const c of ['SB-PAC-10X100-235', 'SB-PAC-10X60-235']) expect(P(c).dataIssues.join(' ')).toContain('peso líquido ESTIMADO')
+    expect(plan.warnings.find((w) => w.code === 'EXTRA_PRODUCTS')).toMatchObject({ level: 'INFO', codes: ['SB-PAC-10X100-235', 'SB-PAC-10X60-235'] })
+    expect(plan.summary.parsedRows).toBe(FIXTURE_PRODUCT_ROWS.length)
+  })
+  it('se a planilha passar a ter o mesmo produto, fica o código da fábrica', () => {
+    const official = { ...FIXTURE_PRODUCT_ROWS[0], row: 998, code: 20999, group: 'SILO PLAS/RESERV SBG', measure: '10PESX100M', thickness: '235MIC', brand: 'PACIFIL', netKg: 214, grossKg: 221, ean: null }
+    const pl = buildImportPlan(input({ products: [...FIXTURE_PRODUCT_ROWS, official] }))
+    expect(pl.products.find((x) => x.code === 'SB-PAC-10X100-235')).toBeUndefined()
+    expect(pl.discarded.find((x) => x.code === 'SB-PAC-10X100-235')).toMatchObject({ keptCode: '20999' })
+  })
+  it('na reimportação o produto criado vira atualização pelo SKU', () => {
+    const created = buildImportPlan(input())
+    const asCurrent: CurrentVariant[] = created.products
+      .filter((x) => x.code.startsWith('SB-PAC-10X'))
+      .map((x, i) => ({ variantId: 9000 + i, productId: 9000 + i, sku: x.code, name: x.name, familyCode: 'SILO_BAG', familyName: 'Silo-bolsa', line: 'Silo-bolsa', brand: 'Pacifil', active: true, thicknessUm: x.thicknessUm, diameterFt: x.diameterFt, widthM: null, lengthM: x.lengthM, lengthFt: null, attrs: x.attrs, ean: null, pack: null }))
+    const pl = buildImportPlan(input({ current: { ...FIXTURE_CURRENT, variants: [...FIXTURE_CURRENT.variants, ...asCurrent] } }))
+    for (const c of ['SB-PAC-10X100-235', 'SB-PAC-10X60-235']) expect(P(c, pl)).toMatchObject({ action: 'UPDATE', match: { lineRelation: 'EXACT_CODE' } })
+    expect(pl.deactivations.variants.some((v) => v.sku === 'SB-PAC-10X100-235' || v.sku === 'SB-PAC-10X60-235')).toBe(false)
   })
 })

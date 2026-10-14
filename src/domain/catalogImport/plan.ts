@@ -119,6 +119,19 @@ export function buildImportPlan(input: BuildPlanInput): ImportPlan {
     if (r.ok) parsed.push(r.product)
     else skipped.push({ row: raw.row, code: raw.code == null ? null : String(raw.code), reason: r.reason })
   }
+  const sheetParsed = parsed.length
+  // produtos fora da planilha (decisão): o mesmo motor lê, nomeia e põe caixa; o SKU dado é o código
+  for (const x of d.extraProducts) {
+    const r = classifyRow({ row: 0, code: null, group: x.group, measure: x.measure, thickness: x.thickness, brand: x.brand, netKg: x.netKg, grossKg: null, ean: null }, d, x.sku)
+    if (!r.ok) {
+      warnings.push({ level: 'BLOCKER', code: 'EXTRA_PRODUCT_UNPARSED', message: `Produto fora da planilha ${x.sku} ("${x.group} ${x.measure} ${x.thickness}") não foi entendido: ${r.reason}.`, codes: [x.sku] })
+      continue
+    }
+    r.product.issues.push(x.note)
+    parsed.push(r.product)
+  }
+  if (d.extraProducts.length)
+    warnings.push({ level: 'INFO', code: 'EXTRA_PRODUCTS', message: `${d.extraProducts.length} produto(s) fora da planilha entram por decisão (peso estimado — confirmar): ${d.extraProducts.map((x) => x.sku).join(', ')}.`, codes: d.extraProducts.map((x) => x.sku) })
   if (skipped.length)
     warnings.push({
       level: 'WARN',
@@ -373,7 +386,7 @@ export function buildImportPlan(input: BuildPlanInput): ImportPlan {
   for (const x of products) byLine.set(x.productLine, (byLine.get(x.productLine) ?? 0) + 1)
   const summary: Summary = {
     sheetRows: input.products.length,
-    parsedRows: parsed.length,
+    parsedRows: sheetParsed,
     skippedRows: skipped.length,
     duplicateGroups: dd.groups,
     duplicatesDiscarded: dd.discarded.length,

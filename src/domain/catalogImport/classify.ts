@@ -91,13 +91,16 @@ function tarpLine(group: string, lineText: string | null, d: ImportDecisions): L
   return null
 }
 
-/** Uma linha crua da planilha → produto oficial classificado (ou o motivo de não importar). */
-export function classifyRow(raw: RawProductRow, d: ImportDecisions): ClassifyResult {
-  const code = cellDigits(raw.code)
+/**
+ * Uma linha crua da planilha → produto oficial classificado (ou o motivo de não importar).
+ * `sku`: produto fora da planilha (decisions.extraProducts) — o SKU dado é o código, sem a regra do código numérico.
+ */
+export function classifyRow(raw: RawProductRow, d: ImportDecisions, sku?: string): ClassifyResult {
+  const code = sku ?? cellDigits(raw.code)
   const group = (cellText(raw.group) ?? '').toUpperCase()
   const measure = cellText(raw.measure) ?? ''
   if (!code) return { ok: false, reason: 'sem código (coluna A)' }
-  if (!/^\d{1,12}$/.test(code)) return { ok: false, reason: `código "${code}" não é numérico` }
+  if (!sku && !/^\d{1,12}$/.test(code)) return { ok: false, reason: `código "${code}" não é numérico` }
   if (!group) return { ok: false, reason: 'sem descrição do produto (coluna B)' }
 
   const thicknessText = cellText(raw.thickness)

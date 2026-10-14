@@ -6,17 +6,17 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
     {
       "boxCode": "69493",
       "dims": "1000×600×220",
-      "products": 41,
+      "products": 38,
     },
     {
       "boxCode": "74043",
       "dims": "1140×570×570",
-      "products": 27,
+      "products": 28,
     },
     {
       "boxCode": "69490",
       "dims": "1000×600×450",
-      "products": 26,
+      "products": 27,
     },
     {
       "boxCode": "69488",
@@ -59,19 +59,9 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "products": 13,
     },
     {
-      "boxCode": "75913",
-      "dims": "1000×600×100",
-      "products": 12,
-    },
-    {
       "boxCode": "79582",
       "dims": "1140×570×150",
       "products": 12,
-    },
-    {
-      "boxCode": "69496",
-      "dims": "1000×600×130",
-      "products": 11,
     },
     {
       "boxCode": "79581",
@@ -81,6 +71,16 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
     {
       "boxCode": "69497",
       "dims": "1150×570×1060",
+      "products": 10,
+    },
+    {
+      "boxCode": "72786",
+      "dims": "600×500×130",
+      "products": 10,
+    },
+    {
+      "boxCode": "75913",
+      "dims": "1000×600×100",
       "products": 10,
     },
     {
@@ -94,14 +94,14 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "products": 9,
     },
     {
-      "boxCode": "72786",
-      "dims": "600×500×130",
-      "products": 9,
-    },
-    {
       "boxCode": "74041",
       "dims": "1000×600×350",
       "products": 8,
+    },
+    {
+      "boxCode": "69496",
+      "dims": "1000×600×130",
+      "products": 7,
     },
     {
       "boxCode": "77289",
@@ -139,11 +139,6 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "products": 4,
     },
     {
-      "boxCode": "75381",
-      "dims": "600×500×100",
-      "products": 4,
-    },
-    {
       "boxCode": "77288",
       "dims": "2250×380×180",
       "products": 4,
@@ -174,15 +169,15 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "family": "SILO_BAG",
       "name": "Silo-bolsa",
       "pending": 25,
-      "total": 227,
-      "withPackaging": 202,
+      "total": 229,
+      "withPackaging": 204,
     },
     {
       "family": "SILAGE_TARP",
       "name": "Lona de silagem",
-      "pending": 99,
-      "total": 225,
-      "withPackaging": 126,
+      "pending": 110,
+      "total": 224,
+      "withPackaging": 114,
     },
     {
       "family": "HIDROSILO",
@@ -230,14 +225,14 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
   "byLine": [
     {
       "line": "Silo-bolsa",
-      "total": 195,
+      "total": 197,
     },
     {
       "line": "Lona BigSafe",
       "total": 97,
     },
     {
-      "line": "Lona BPF",
+      "line": "Lona padrão",
       "total": 55,
     },
     {
@@ -245,8 +240,8 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
       "total": 53,
     },
     {
-      "line": "Lona padrão",
-      "total": 38,
+      "line": "Lona BPF",
+      "total": 37,
     },
     {
       "line": "Lona Big Silo",
@@ -310,22 +305,22 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
     },
   ],
   "confidence": {
-    "HIGH": 193,
-    "MEDIUM": 187,
+    "HIGH": 199,
+    "MEDIUM": 171,
   },
-  "deactivations": 154,
-  "duplicateGroups": 89,
-  "duplicatesDiscarded": 110,
+  "deactivations": 152,
+  "duplicateGroups": 90,
+  "duplicatesDiscarded": 111,
   "ean": {
-    "EAN13": 531,
+    "EAN13": 530,
     "GTIN14": 15,
     "INVALID": 11,
-    "missing": 0,
+    "missing": 2,
   },
   "familiesWithoutActiveProducts": [
     "Animal Comfort",
   ],
-  "grossReplaced": 130,
+  "grossReplaced": 128,
   "newFamilies": [
     "Filmes em rolo",
     "Hidropeso",
@@ -343,13 +338,13 @@ exports[`planilha oficial inteira > 667 linhas, EAN, repetidos e resumo 1`] = `
     "Adesivo de reparo",
   ],
   "parsedRows": 667,
-  "pending": 177,
-  "planned": 557,
-  "refPalletsEstimate": 380,
+  "pending": 188,
+  "planned": 558,
+  "refPalletsEstimate": 370,
   "sheetRows": 667,
   "skippedRows": 0,
-  "toCreate": 557,
+  "toCreate": 558,
   "toUpdate": 0,
-  "withPackaging": 380,
+  "withPackaging": 370,
 }
 `;

@@ -8,14 +8,28 @@
  * "09PESX75M" = "9PESX75M", "225MIC" = "8.86MIL", "10MILL" = "10MIL", "BIGSAFE 4MX50M" = "BIGSAFE 4X50".
  * O GRUPO da planilha entra na chave: as lonas do grupo "SILO PLAS/RESERV BPF" e os "BPF 8X50…" do grupo
  * SILO PLASTICO/RESERV têm o mesmo peso e medida, mas são produtos diferentes (formato aberto × tubular).
+ * Exceção: lona cadastrada no grupo de silo-bolsa (SBG, medida em m × m — erro de cadastro) compara com o grupo
+ * de lonas que cai na mesma linha (19771 SBG "8MX100M 120MIC" = 17367 do grupo BPF, as duas Lona padrão).
  */
 import type { OfficialProduct } from './classify'
 import type { ImportDecisions } from './decisions'
 import type { Discarded } from './types'
 import { badDataReasons } from './weights'
 
+/** código para "o mais recente": produto fora da planilha (SKU não numérico) perde para qualquer código da fábrica */
+const codeNum = (c: string) => (/^\d+$/.test(c) ? Number(c) : -1)
 const squash = (s: string | null) => (s ?? '').toUpperCase().replace(/\s+/g, '')
-const groupKey = (p: OfficialProduct) => p.group.toUpperCase().replace(/\s+/g, ' ').trim()
+const normGroup = (g: string) => g.toUpperCase().replace(/\s+/g, ' ').trim()
+const groupKey = (p: OfficialProduct) => normGroup(p.group)
+const NOT_GROUPS = new Set(['namedBpfPrefix', 'otherPlain', 'multilayer'])
+
+/** Grupo da chave: o da planilha; a lona do grupo SBG usa o único grupo de lonas que cai na mesma linha. */
+function keyGroup(p: OfficialProduct, d: ImportDecisions): string {
+  const g = groupKey(p)
+  if (p.kind !== 'TARP' || !/SBG$/.test(g)) return g
+  const homes = Object.entries(d.tarpGroupLine).filter(([k, line]) => !NOT_GROUPS.has(k) && line === p.lineKey)
+  return homes.length === 1 ? normGroup(homes[0][0]) : g
+}
 
 /** Medidas e características lidas (sem o grupo): o mesmo produto escrito de outro jeito dá a mesma chave. */
 function specKey(p: OfficialProduct): string {
@@ -29,9 +43,9 @@ const rawKey = (p: OfficialProduct) => [groupKey(p), squash(p.measure), squash(p
  * Chave da descrição: grupo da planilha + o que foi lido da medida/espessura/marca. Sem medida nem espessura
  * lidas (nada a comparar), vale o texto cru.
  */
-export function dedupeKey(p: OfficialProduct): string {
+export function dedupeKey(p: OfficialProduct, d: ImportDecisions): string {
   const read = p.diameterFt != null || p.widthM != null || p.lengthM != null || p.widthCm != null || p.thicknessUm != null
-  return read ? `${groupKey(p)} | ${specKey(p)}` : `texto | ${rawKey(p)}`
+  return read ? `${keyGroup(p, d)} | ${specKey(p)}` : `texto | ${rawKey(p)}`
 }
 
 export const describe = (p: OfficialProduct) => [p.group, p.measure, p.thicknessText ?? '', p.brandRaw ?? ''].join(' | ')
@@ -50,7 +64,7 @@ export interface DedupeResult {
 export function dedupe(products: OfficialProduct[], d: ImportDecisions): DedupeResult {
   const byKey = new Map<string, OfficialProduct[]>()
   for (const p of products) {
-    const k = dedupeKey(p)
+    const k = dedupeKey(p, d)
     const list = byKey.get(k)
     if (list) list.push(p)
     else byKey.set(k, [p])
@@ -66,7 +80,7 @@ export function dedupe(products: OfficialProduct[], d: ImportDecisions): DedupeR
       continue
     }
     groups++
-    const sorted = [...list].sort((a, b) => Number(b.code) - Number(a.code))
+    const sorted = [...list].sort((a, b) => codeNum(b.code) - codeNum(a.code))
     const bad = new Map(sorted.map((p) => [p, badDataReasons(p, d)]))
     const good = sorted.find((p) => bad.get(p)!.length === 0)
     const chosen = good ?? sorted[0]
@@ -77,9 +91,14 @@ export function dedupe(products: OfficialProduct[], d: ImportDecisions): DedupeR
     for (const p of sorted) {
       if (p === chosen) continue
       const why = bad.get(p)!
-      const higher = Number(p.code) > Number(chosen.code)
+      const higher = codeNum(p.code) > codeNum(chosen.code)
       const txt = (x: OfficialProduct) => `${x.measure} ${x.thicknessText ?? ''}`.trim()
-      const spelling = rawKey(p) !== rawKey(chosen) ? ` — o mesmo produto escrito de outro jeito ("${txt(p)}" × "${txt(chosen)}")` : ''
+      const spelling =
+        groupKey(p) !== groupKey(chosen)
+          ? ` — a mesma lona em outro grupo da planilha ("${p.group}" × "${chosen.group}")`
+          : rawKey(p) !== rawKey(chosen)
+            ? ` — o mesmo produto escrito de outro jeito ("${txt(p)}" × "${txt(chosen)}")`
+            : ''
       discarded.push({
         code: p.code,
         row: p.row,

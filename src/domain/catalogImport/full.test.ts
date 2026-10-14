@@ -28,19 +28,23 @@ describe.skipIf(!dir)('planilha oficial inteira', () => {
     // EAN antes de descartar os repetidos: 636 EAN-13, 17 GTIN-14, 14 inválidos
     const st = input.products.map((r) => eanStatusOf(cellDigits(r.ean)).status)
     expect([st.filter((x) => x === 'EAN13').length, st.filter((x) => x === 'GTIN14').length, st.filter((x) => x === 'INVALID').length]).toEqual([636, 17, 14])
-    expect(s.duplicateGroups).toBe(89)
-    expect(s.duplicatesDiscarded).toBe(110)
-    expect(s.planned).toBe(557)
+    // 90 / 111: inclui a lona 19771 do grupo SBG = 17367 do grupo BPF (as duas Lona padrão 8 × 100 m × 120 µm)
+    expect(s.duplicateGroups).toBe(90)
+    expect(s.duplicatesDiscarded).toBe(111)
+    // 556 da planilha + 2 fora dela (silo-bolsas 10 pés × 100 / × 60 m × 235 µm)
+    expect(s.planned).toBe(558)
     expect(plan.warnings.find((w) => w.code === 'DUPLICATES')?.message).toContain('20012 → 17018; 19489 → 17262; 19403 → 17474; 18145 → 17039; 17973/17129 → 16669; 17126 → 16670')
     expect(s.withPackaging + s.pending).toBe(s.planned)
     expect(plan.warnings.some((w) => w.level === 'BLOCKER')).toBe(false)
-    expect(s.deactivations).toBe(input.current.variants.filter((v) => v.active && v.sku !== 'KIT-HF').length)
+    const kept = ['KIT-HF', 'SB-PAC-6X75-180', 'SB-PAC-6X100-180']
+    expect(s.deactivations).toBe(input.current.variants.filter((v) => v.active && !kept.includes(v.sku)).length)
+    expect(plan.warnings.find((w) => w.code === 'KEEP_ACTIVE_MISSING')).toBeUndefined()
     // decisão 10: nenhum par de produtos com o mesmo nome (as duas séries de lona ficam em linhas diferentes)
     const names = plan.products.map((x) => x.name)
     expect(new Set(names).size).toBe(names.length)
-    // decisão 4: a exportação continua com Lona padrão
+    // decisão 4 (14/10/2026): grupo BPF = Lona padrão (exportação); "BPF 8X50…" do SILO PLASTICO/RESERV = Lona BPF
     const lonas = (prefix: string) => plan.products.filter((x) => x.name.startsWith(prefix) && isRuleLona(x.name) && (lonaWidthM(x.name) ?? 99) <= 14).length
-    expect([lonas('Lona padrão'), lonas('Lona BPF'), lonas('Lona Plus')]).toEqual([38, 56, 3])
+    expect([lonas('Lona padrão'), lonas('Lona BPF'), lonas('Lona Plus')]).toEqual([46, 47, 3])
     // decisões 11 e 12; paletes que servem para a caixa (nada acima de 2.292 mm)
     const pk = (c: string) => plan.products.find((x) => x.code === c)?.packaging
     expect(pk('17822')).toMatchObject({ boxCode: '52185' })
