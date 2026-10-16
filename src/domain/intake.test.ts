@@ -58,11 +58,24 @@ describe('clientes e equipamento', () => {
     { id: 3, name: 'Sol Agro' },
   ]
   it('normaliza razão social', () => expect(normName('Agropecuária El Sol, S.A.')).toBe('agropecuaria el sol'))
+  it('"S/A" do ERP = "S.A." do pedido', () => expect(normName('HENDERSON & CIA S/A')).toBe(normName('Henderson & Cia. S.A.')))
   it('igual após normalizar → cadastrado; parecidos para conferir', () => {
     expect(matchCustomer('AGROPECUARIA EL SOL SA', cs).matchedId).toBe(1)
     const r = matchCustomer('Alema Koudijs Feed', cs)
     expect(r.matchedId).toBeNull()
     expect(r.similar.map((x) => x.id)).toEqual([2])
+  })
+  it('homônimos (mesma razão social, códigos diferentes): ambíguo, nenhum escolhido às cegas', () => {
+    const hs = [...cs, { id: 7, name: 'HENDERSON & CIA S/A' }, { id: 8, name: 'Henderson & Cia. S.A.' }, { id: 9, name: 'Henderson Agro' }]
+    const r = matchCustomer('HENDERSON & CIA SA', hs)
+    expect(r.matchedId).toBeNull()
+    expect(r.homonyms).toBe(2)
+    expect(r.similar.map((x) => x.id).slice(0, 2)).toEqual([7, 8])
+    expect(r.similar.map((x) => x.id)).toContain(9)
+    // um só com o nome: escolhido; homonyms = 0
+    expect(matchCustomer('Alema Farms', hs)).toMatchObject({ matchedId: 2, homonyms: 0 })
+    // no texto livre também não adivinha
+    expect(customerInText('contenedor para Henderson & Cia', hs.filter((c) => c.id !== 9))).toBeNull()
   })
   it('equipamento só quando explícito', () => {
     expect(equipmentCodeInText("1x40HC")).toBe('40HC')

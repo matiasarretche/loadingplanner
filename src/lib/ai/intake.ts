@@ -316,7 +316,9 @@ export async function interpretCustomerOrder(user: CurrentUser, input: { text: s
 
   const rf = (value: string | undefined, evidence: string | undefined) => (value ? { value, evidence: evidence ?? null } : null)
   const custName = o.customer?.name
-  const cm = custName ? matchCustomer(custName, customers) : { matchedId: null, similar: [] }
+  const cm = custName ? matchCustomer(custName, customers) : { matchedId: null, similar: [], homonyms: 0 }
+  // homônimos (mesma razão social com códigos diferentes): não escolhe às cegas — o usuário escolhe no seletor
+  const issues = cm.homonyms > 1 ? [`Há ${cm.homonyms} clientes cadastrados com o nome “${custName}”: escolha o certo pelo código ou pela cidade.`, ...o.issues] : o.issues
   // equipamento: código válido do cadastro, ou reconhecido no texto citado; senão fica para perguntar
   const eqCode = (o.equipment_code && equipList.find((e) => e.code.toUpperCase() === o.equipment_code!.toUpperCase())?.code) || (o.equipment_text ? equipmentCodeInText(o.equipment_text) : null)
   const eqHit = eqCode ? equipList.find((e) => e.code === eqCode) : undefined
@@ -331,6 +333,7 @@ export async function interpretCustomerOrder(user: CurrentUser, input: { text: s
       taxId: o.customer?.tax_id ?? null,
       matchedId: cm.matchedId,
       similar: cm.similar,
+      homonyms: cm.homonyms,
     },
     orderRef: rf(o.order_ref, o.order_ref_evidence),
     destination: rf(o.destination_country, o.destination_evidence),
@@ -340,7 +343,7 @@ export async function interpretCustomerOrder(user: CurrentUser, input: { text: s
     equipmentText: !eqHit && o.equipment_text ? o.equipment_text : null,
     notes: o.notes ?? null,
     lines,
-    issues: o.issues,
+    issues,
     files: read,
   }
 }

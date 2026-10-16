@@ -10,6 +10,7 @@ import { cargoVehicleWhere } from '@/lib/vehicles'
 import { isService } from '@/domain/shipmentType'
 import { currentPackCatalog } from '@/lib/catalog'
 import { OrderIntake } from '../ia/OrderIntake'
+import { formatCustomerAddress } from '@/domain/customerAddress'
 
 export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas/nova'>) {
   const u = await requireUser('editPlans')
@@ -69,6 +70,8 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
     }
   }
   const fmtKg = (v: number | null) => (v == null ? '?' : v.toLocaleString('pt-BR'))
+  // clientes ativos para o seletor com busca (nome, cidade, país, código do ERP) e o endereço do cadastro em uma linha
+  const pickerCustomers = customers.map((c) => ({ id: c.id, name: c.name, code: c.code, city: c.city, country: c.country ?? '', address: formatCustomerAddress(c) }))
   // entrada pelo PEDIDO DO CLIENTE (texto, anexos, ditado) interpretado pela IA
   const byOrder = sp.entrada === 'pedido'
   const catalog = byOrder ? await currentPackCatalog() : []
@@ -89,7 +92,7 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
       {byOrder ? (
         <OrderIntake
           areas={areas}
-          customers={customers.map((c) => ({ id: c.id, name: c.name, country: c.country ?? '' }))}
+          customers={pickerCustomers}
           equipment={[
             ...containers.map((c) => ({ value: `CONTAINER:${c.id}`, label: `${c.code} — ${c.name}`, mode: c.transportMode === 'AIR' ? 'AIR' : 'SEA' })),
             ...vehicles.map((v) => ({ value: `VEHICLE:${v.id}`, label: `${v.code} — ${v.name}`, mode: 'ROAD' })),
@@ -104,7 +107,7 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
         aiMode={sp.ia === '1'}
         initialService={isService(sp.tipo) ? sp.tipo : undefined}
         agents={agents.map((a) => ({ value: String(a.id), label: a.name }))}
-        customers={customers.map((c) => ({ value: String(c.id), agentId: c.agentId != null ? String(c.agentId) : '', name: c.name, address: c.address ?? '', label: `${c.name}${c.country ? ` (${c.country})` : ''}`, country: c.country ?? '' }))}
+        customers={customers.map((c, i) => ({ ...pickerCustomers[i], agentId: c.agentId != null ? String(c.agentId) : '' }))}
         ulds={containers.filter((c) => c.transportMode === 'AIR').map((c) => ({
           value: `CONTAINER:${c.id}`,
           label: `${c.code} — ${c.name}`,

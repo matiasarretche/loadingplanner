@@ -20,6 +20,8 @@ export const BODY_LIMITS = {
   photoUpload: 3.5 * MB,
   /** importação do catálogo oficial (Manutenção): planilha de produtos + tabela de caixas, juntas */
   catalogImport: 4.2 * MB,
+  /** planilha dos clientes de exportação (Manutenção): a carteira inteira tem ~40 KB */
+  customerImport: 1 * MB,
 }
 
 /** imagens dos anexos da IA: lado maior (o modelo reduz tudo o que passar disso) e qualidade JPEG */

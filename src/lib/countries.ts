@@ -47,9 +47,27 @@ const NAMES: Record<string, string> = {
   china: 'CN',
   australia: 'AU',
   'nova zelandia': 'NZ', 'nueva zelanda': 'NZ', 'new zealand': 'NZ',
+  // grafias da carteira de clientes do ERP da fábrica (e nomes usuais que o Intl não reconhece):
+  // "HOLANDA", "FEDERACAO RUSSA", "REPUB.DOMINICANA", "EMIR.ARABES UNIDO", "HONG KONG", "FORMOSA(TAIWAN)"
+  holanda: 'NL',
+  'federacao russa': 'RU', russia: 'RU',
+  'repub dominicana': 'DO',
+  'emir arabes unido': 'AE',
+  'hong kong': 'HK',
+  formosa: 'TW', 'formosa taiwan': 'TW',
 }
 
-const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+/** apelidos que valem no campo País, mas não para achar o país num texto livre ("Formosa" também é província argentina) */
+const NOT_IN_TEXT = new Set(['formosa'])
+
+/** minúsculas, sem acento; pontuação vira espaço ("REPUB.DOMINICANA" = "repub dominicana", "FORMOSA(TAIWAN)" = "formosa taiwan") */
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 
 /** Todos os países/territórios habitados (ISO-3166 alfa-2) — para escolher o país em listas. */
 export const ALL_COUNTRY_CODES: string[] = (
@@ -107,6 +125,7 @@ export function countryInText(text: string): string | null {
   const t = ` ${norm(text)} `
   let best: { name: string; at: number } | null = null
   for (const name of Object.keys(NAMES)) {
+    if (NOT_IN_TEXT.has(name)) continue
     const at = t.search(new RegExp(`[^a-z]${name.replace(/ /g, '\\s+')}[^a-z]`))
     if (at >= 0 && name.length > 3 && (!best || at < best.at)) best = { name, at }
   }

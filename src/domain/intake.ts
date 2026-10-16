@@ -54,8 +54,10 @@ export interface IntakeResult {
     taxId: string | null
     /** cliente já cadastrado que corresponde ao nome lido */
     matchedId: number | null
-    /** outros cadastrados parecidos (para escolher) */
+    /** outros cadastrados parecidos (para escolher); os homônimos vêm primeiro */
     similar: { id: number; name: string }[]
+    /** quantos cadastros ativos têm exatamente o nome lido (> 1 = ambíguo: o usuário escolhe pelo código/cidade) */
+    homonyms?: number
   }
   orderRef: ReadField | null
   destination: ReadField | null
@@ -144,19 +146,24 @@ export function normName(s: string): string {
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
-    .replace(/\b(s\.?\s?a\.?|s\.?r\.?l\.?|ltda\.?|ltd\.?|inc\.?|llc|cia\.?|s\.?a\.?s\.?|eireli|me|epp)\b/g, ' ')
+    .replace(/\b(s[./]?\s?a\.?|s\.?r\.?l\.?|ltda\.?|ltd\.?|inc\.?|llc|cia\.?|s\.?a\.?s\.?|eireli|me|epp)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
 }
 
-/** Cliente cadastrado correspondente (nome igual após normalizar) e parecidos (um contém o outro / palavras em comum). */
-export function matchCustomer(name: string, customers: { id: number; name: string }[]): { matchedId: number | null; similar: { id: number; name: string }[] } {
+/**
+ * Cliente cadastrado correspondente (nome igual após normalizar) e parecidos (um contém o outro / palavras em comum).
+ * HOMÔNIMOS (a carteira do ERP tem razões sociais repetidas, com códigos diferentes): mais de um cadastro com o
+ * mesmo nome = ambíguo — nenhum é escolhido; todos vêm primeiro em `similar` e `homonyms` diz quantos são.
+ */
+export function matchCustomer(name: string, customers: { id: number; name: string }[]): { matchedId: number | null; similar: { id: number; name: string }[]; homonyms: number } {
   const n = normName(name)
-  if (!n) return { matchedId: null, similar: [] }
-  const exact = customers.find((c) => normName(c.name) === n)
+  if (!n) return { matchedId: null, similar: [], homonyms: 0 }
+  const exacts = customers.filter((c) => normName(c.name) === n)
+  const exact = exacts.length === 1 ? exacts[0] : null
   const words = new Set(n.split(' ').filter((w) => w.length >= 4))
-  const similar = customers
-    .filter((c) => c.id !== exact?.id)
+  const others = customers
+    .filter((c) => normName(c.name) !== n)
     .map((c) => {
       const cn = normName(c.name)
       const common = cn.split(' ').filter((w) => words.has(w)).length
@@ -167,7 +174,8 @@ export function matchCustomer(name: string, customers: { id: number; name: strin
     .sort((a, b) => b.score - a.score)
     .slice(0, 5)
     .map((x) => x.c)
-  return { matchedId: exact?.id ?? null, similar }
+  const homonyms = exacts.length > 1 ? exacts : []
+  return { matchedId: exact?.id ?? null, similar: [...homonyms, ...others], homonyms: homonyms.length }
 }
 
 /** palavras que não identificam cliente (genéricas, de produto ou de transporte) */

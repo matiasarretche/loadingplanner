@@ -23,6 +23,7 @@ import { containerSpace, limitSnapshot, vehicleSpace } from '@/lib/snapshots'
 import { unitNoun } from '@/lib/units'
 import { autoPlanName, normalizeOrderRef } from '@/lib/orderRef'
 import { placeValue } from '@/lib/places'
+import { CUSTOMER_ADDRESS_FIELDS } from '@/domain/customerAddress'
 
 const draftSchema = z.object({
   area: z.string(),
@@ -171,8 +172,12 @@ export async function createFromIntakeAction(raw: IntakeDraft): Promise<IntakeCr
       if (!customerId) {
         ;[{ id: customerId }] = await tx.insert(schema.customers).values({ name: d.newCustomer.trim(), country: d.country, address: placeValue(d.customerAddress), createdBy: me.id, updatedBy: me.id }).returning({ id: schema.customers.id })
       } else if (placeValue(d.customerAddress)) {
-        // cliente sem endereço no cadastro: guarda o informado (não sobrescreve um existente)
-        await tx.update(schema.customers).set({ address: placeValue(d.customerAddress), updatedAt: new Date(), updatedBy: me.id }).where(and(eq(schema.customers.id, customerId), isNull(schema.customers.address)))
+        // cliente criado pela tela e ainda sem endereço: guarda o informado. Nunca nos clientes do ERP (com código)
+        // nem em quem já tem algum campo do endereço (rua, complemento, bairro, CEP, cidade, estado)
+        await tx
+          .update(schema.customers)
+          .set({ address: placeValue(d.customerAddress), updatedAt: new Date(), updatedBy: me.id })
+          .where(and(eq(schema.customers.id, customerId), isNull(schema.customers.code), ...CUSTOMER_ADDRESS_FIELDS.map((k) => isNull(schema.customers[k]))))
       }
       const [sh] = await tx
         .insert(schema.shipments)

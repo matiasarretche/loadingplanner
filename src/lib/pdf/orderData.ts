@@ -12,8 +12,51 @@ import { DEFAULT_QUADRANT_RULES, evaluateQuadrants, quadrantShares } from '@/dom
 import type { loadPlanVersion } from '@/lib/planData'
 import type { FamilyTech } from '@/domain/technology'
 import type { OrderPdfData } from './orderPdf'
+import { formatCustomerAddress } from '@/domain/customerAddress'
+import { countryCode, countryNameIn } from '@/lib/countries'
 
 type PlanData = NonNullable<Awaited<ReturnType<typeof loadPlanVersion>>>
+
+/** minúsculas, sem acento, só letras e números separados por um espaço (para comparar partes) */
+const tok = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+/** `needle` aparece em `hay` como palavras inteiras */
+const within = (hay: string, needle: string) => Boolean(tok(needle)) && ` ${tok(hay)} `.includes(` ${tok(needle)} `)
+/** país comparável: código ISO quando reconhecido, senão o nome normalizado */
+const countryKey = (s: string) => countryCode(s) ?? tok(s)
+
+/**
+ * Cidade e endereço do comprador no bloco do cliente do PDF (pedido/proforma).
+ * - O país do comprador aparece quando é OUTRO que o destino (comprador em Miami, carga para Honduras):
+ *   no fim do endereço — a menos que ele já termine no país ("…, FL 33172, USA") — ou, sem endereço,
+ *   junto da cidade. No idioma do PDF.
+ * - A cidade não sai duas vezes: com o endereço já trazendo a cidade (fora da 1ª parte, a da rua), a linha
+ *   "Cidade" some (`city` null).
+ */
+export function buyerPlace(
+  customer: { city?: string | null; country?: string | null },
+  order: { destination: string; customerAddress?: string | null },
+  lang: string,
+): { city: string | null; address: string | null } {
+  const address = (order.customerAddress ?? '').trim()
+  const city = (customer.city ?? '').trim()
+  const country = (customer.country ?? '').trim()
+  const target = country ? countryKey(country) : ''
+  const other = country && target !== countryKey(order.destination) ? (countryCode(country) ? countryNameIn(country, lang) : country) : ''
+  if (!address) return { city: [city, other].filter(Boolean).join(', ') || '—', address: null }
+  const parts = address.split(',')
+  // últimas 1 a 4 palavras do endereço: "USA", "Uruguay", "Estados Unidos", "UY"…
+  const tail = tok(parts[parts.length - 1]).split(' ')
+  const endsInCountry = [1, 2, 3, 4].some((n) => n <= tail.length && countryKey(tail.slice(-n).join(' ')) === target)
+  // cidade numa parte depois da rua ("…, 12400 MONTEVIDEO"); endereço sem vírgula: só se terminar nela
+  const cityInAddress = Boolean(tok(city)) && (parts.length > 1 ? parts.slice(1).some((x) => within(x, city)) : ` ${tok(address)}`.endsWith(` ${tok(city)}`))
+  return { city: city && !cityInAddress ? city : null, address: other && !endsInCountry ? `${address}, ${other}` : address }
+}
 
 /** Conteúdo do PDF a partir da versão SALVA (o documento sempre bate com o que foi registrado). */
 /** `rank` = ordem única de produtos (productRank): a tabela de produtos sai na mesma ordem do catálogo. */
@@ -68,7 +111,10 @@ export function orderPdfData(data: PlanData, rank?: Map<string, number>, given?:
       service: serviceOf(data.shipment),
       originPlace: data.shipment?.originPlace ?? null,
       destinationPlace: data.shipment?.destinationPlace ?? null,
-      customerAddress: data.shipment?.customerAddress ?? data.customer?.address ?? null,
+      // endereço da carga (cópia feita ao criar); sem ele, o do cadastro do cliente em uma linha
+      // (rua, complemento, bairro, CEP, cidade, estado). O país do comprador, quando é outro que o
+      // destino, entra no layout, no idioma do PDF (buyerPlace)
+      customerAddress: data.shipment?.customerAddress || (data.customer ? formatCustomerAddress(data.customer) : '') || null,
     },
     // sem equipamento: bloco do ENVIO (paletes/volumes, CBM, pesos, taxável) no lugar do equipamento
     shipping: doc.space.kind === 'NONE' ? (() => {

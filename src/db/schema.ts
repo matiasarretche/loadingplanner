@@ -364,11 +364,19 @@ export const agents = pgTable('agent', {
 
 export const customers = pgTable('customer', {
   id: serial('id').primaryKey(),
+  /** código do cliente no ERP da fábrica (planilha "Clientes de Exportação"); único; nulo nos criados pela tela */
+  code: text('code').unique('customer_code_unique'),
   name: text('name').notNull(),
   country: text('country'),
+  /** estado / província / departamento */
+  state: text('state'),
   city: text('city'),
-  /** endereço do cliente (sugerido ao criar a carga) */
+  /** bairro */
+  district: text('district'),
+  postalCode: text('postal_code'),
+  /** endereço do cliente: rua e número (sugerido ao criar a carga, junto com complemento, bairro, CEP, cidade e estado) */
   address: text('address'),
+  addressComplement: text('address_complement'),
   taxId: text('tax_id'),
   /** agente que intermedia as vendas a este cliente (comissão incluída no preço da cotização) */
   agentId: integer('agent_id').references(() => agents.id),

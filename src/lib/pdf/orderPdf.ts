@@ -11,6 +11,7 @@ import { PaymentTerms, paymentTermsText, TermsLang } from '@/domain/paymentTerms
 import type { KitBoxLine } from '@/domain/kitBoxes'
 import { FamilyTech, TECHNOLOGIES, TechKey } from '@/domain/technology'
 import { clean } from './winAnsi'
+import { buyerPlace } from './orderData'
 
 export interface OrderPdfData {
   company: string
@@ -580,17 +581,19 @@ export async function buildOrderPdf(d: OrderPdfData, images: Uint8Array[], brand
   w.header(t.orderTitle, `${d.plan.name} · ${t.version} V${d.plan.version} (${status})`, d.generatedAt.toLocaleDateString(t.locale, { timeZone: PDF_TZ }), d.company)
 
   w.section(t.secCustomer)
+  // país do comprador quando é outro que o destino; a cidade não se repete na linha do endereço
+  const buyer = buyerPlace(d.customer, d.order, brand.lang)
   w.pairs([
     [t.customer, d.customer.name],
     [t.orderRef, d.order.ref || '—'],
     [t.destination, countryNameIn(d.order.destination, brand.lang)],
     [t.incoterm, d.order.incoterm],
-    [t.city, d.customer.city || '—'],
+    ...(buyer.city != null ? ([[t.city, buyer.city]] as [string, string][]) : []),
     [t.transportL, d.shipping && d.order.service && NOEQ[brand.lang].svc[d.order.service] ? NOEQ[brand.lang].svc[d.order.service] : t.mode[d.order.mode] ?? d.order.mode],
     ...(d.customer.taxId ? ([[t.taxId, d.customer.taxId]] as [string, string][]) : []),
     ...(d.order.originPlace ? ([[t.placeOrigin(d.order.mode), d.order.originPlace]] as [string, string][]) : []),
     ...(d.order.destinationPlace ? ([[t.placeDestination(d.order.mode), d.order.destinationPlace]] as [string, string][]) : []),
-    ...(d.order.customerAddress ? ([[t.customerAddress, d.order.customerAddress]] as [string, string][]) : []),
+    ...(buyer.address ? ([[t.customerAddress, buyer.address]] as [string, string][]) : []),
   ])
 
   if (d.equipment) {

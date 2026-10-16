@@ -33,10 +33,12 @@ export default async function ResourceEdit({ params }: PageProps<'/cadastros/[re
     agents: (await db.select().from(schema.agents).orderBy(asc(schema.agents.name))).map((a) => ({ value: String(a.id), label: `${a.name}${a.active ? '' : ' (inativo)'}` })),
   }
   const action = saveResourceAction.bind(null, recurso, isNew ? null : Number(id))
+  // cliente: "código do ERP — razão social" (o código sozinho não diz quem é); demais cadastros: código ou nome
+  const title = isNew ? '' : recurso === 'clientes' ? [row!.code, row!.name].filter(Boolean).map(String).join(' — ') : String(row!.code ?? row!.name)
   return (
     <>
       <div className="page-head">
-        <h1>{isNew ? `Novo ${r.singular}` : `${r.title}: ${String(row!.code ?? row!.name)}`}</h1>
+        <h1>{isNew ? `Novo ${r.singular}` : `${r.title}: ${title}`}</h1>
         <Link href={`/cadastros/${recurso}`}>← Voltar</Link>
       </div>
       {!isNew && (

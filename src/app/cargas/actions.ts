@@ -30,6 +30,7 @@ import { parseMoney, PaymentTerms, paymentTermsErrors } from '@/domain/paymentTe
 import { VEHICLE_LENGTH_LIMITS, withVehicleLength } from '@/domain/vehicleLength'
 import { planUndoApproval, UndoApprovalBlock } from '@/domain/approval'
 import { commissionAgentId } from '@/domain/pricing'
+import { CUSTOMER_ADDRESS_FIELDS } from '@/domain/customerAddress'
 
 export interface NewPlanState {
   error?: string
@@ -127,8 +128,12 @@ export async function createPlanAction(_: NewPlanState, fd: FormData): Promise<N
         .values({ name: newCustomer, country, address: customerAddress, createdBy: me.id, updatedBy: me.id })
         .returning({ id: schema.customers.id })
     } else if (customerAddress) {
-      // cliente sem endereço no cadastro: guarda o informado (não sobrescreve um existente)
-      await tx.update(schema.customers).set({ address: customerAddress, updatedAt: new Date(), updatedBy: me.id }).where(and(eq(schema.customers.id, customerId), isNull(schema.customers.address)))
+      // cliente criado pela tela e ainda sem endereço: guarda o informado. Nunca nos clientes do ERP (com código)
+      // nem em quem já tem algum campo do endereço (rua, complemento, bairro, CEP, cidade, estado)
+      await tx
+        .update(schema.customers)
+        .set({ address: customerAddress, updatedAt: new Date(), updatedBy: me.id })
+        .where(and(eq(schema.customers.id, customerId), isNull(schema.customers.code), ...CUSTOMER_ADDRESS_FIELDS.map((k) => isNull(schema.customers[k]))))
     }
     const [sh] = await tx
       .insert(schema.shipments)

@@ -1,8 +1,10 @@
 import { desc, eq, sql } from 'drizzle-orm'
 import { db, schema } from '@/db'
 import { requireUser } from '@/lib/auth'
+import { customerCounts } from '@/lib/maintenance/customersBackup'
 import { loadCounts } from '@/lib/maintenance/loadsBackup'
 import { CatalogUploadCard, type RecentImport } from './CatalogUploadCard'
+import { CustomerImportCard } from './CustomerImportCard'
 import { DeleteLoadsCard } from './DeleteLoadsCard'
 import css from './manutencao.module.css'
 
@@ -10,13 +12,15 @@ import css from './manutencao.module.css'
 export const maxDuration = 300
 
 /**
- * MANUTENÇÃO (só o administrador principal): importação do catálogo oficial pelas planilhas e exclusão de
- * todas as cargas e proformas (com backup obrigatório antes).
+ * MANUTENÇÃO (só o administrador principal): importação do catálogo oficial pelas planilhas, exclusão de
+ * todas as cargas e proformas e substituição/atualização dos clientes de exportação pela planilha do ERP
+ * (as duas últimas com backup obrigatório antes).
  */
 export default async function ManutencaoPage() {
   await requireUser('manageUsers')
-  const [counts, imports] = await Promise.all([
+  const [counts, customers, imports] = await Promise.all([
     loadCounts(),
+    customerCounts(),
     db
       .select({
         id: schema.catalogImports.id,
@@ -39,6 +43,7 @@ export default async function ManutencaoPage() {
       <div className={css.grid}>
         <CatalogUploadCard recent={recent} />
         <DeleteLoadsCard counts={counts} />
+        <CustomerImportCard current={customers} shipments={counts.shipments} />
       </div>
     </>
   )

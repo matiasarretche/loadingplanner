@@ -9,6 +9,7 @@ import { createPlanAction, quickTransportCompanyAction } from '../actions'
 import { orderRefFieldLabel, orderRefInitial, PROFORMA_PREFIX } from '@/lib/orderRef'
 import { originOrDefault, placeLabels } from '@/lib/places'
 import { CountryInput } from '@/components/CountryInput'
+import { CustomerPicker, type PickerCustomer } from '@/components/CustomerPicker'
 import { DEFAULT_COURIER_DIVISOR, isNoEquipment, isService, SHIPMENT_SERVICES, ShipmentService, TYPE_INFO } from '@/domain/shipmentType'
 
 interface Opt {
@@ -36,8 +37,11 @@ export interface LastLoad {
   date: string
 }
 
+/** Cliente ativo para o seletor: `address` = endereço do cadastro já em uma linha (formatCustomerAddress). */
+export type NewPlanCustomer = PickerCustomer & { country: string; address: string; agentId?: string }
+
 export function NewPlanForm(p: {
-  customers: (Opt & { country: string; name: string; address: string; agentId?: string })[]
+  customers: NewPlanCustomer[]
   /** agentes ativos (comissão no preço) */
   agents?: Opt[]
   containers: Opt[]
@@ -77,6 +81,9 @@ export function NewPlanForm(p: {
   const [typeTouched, setTypeTouched] = useState(Boolean(v.service || p.initialService))
   const [customer, setCustomer] = useState(v.customerId ?? '')
   const [country, setCountry] = useState(v.country ?? (area === 'DOMESTIC' ? 'Brasil' : ''))
+  // último país preenchido sozinho pelo cliente (cadastro ou última carga): se o campo ainda o tem, trocar de
+  // cliente o atualiza; um país digitado pelo usuário (ou o "Brasil" do mercado interno) fica
+  const [countryAuto, setCountryAuto] = useState('')
   const [incoterm, setIncoterm] = useState(v.incoterm ?? 'FOB')
   // agente da carga: vem do cadastro do cliente, pode ser trocado só para esta carga
   const [agentId, setAgentId] = useState(v.agentId ?? '')
@@ -114,16 +121,22 @@ export function NewPlanForm(p: {
   /**
    * Escolhe o cliente e preenche com a sua última carga (área, destino, Incoterm, modalidade,
    * equipamento e limites). Devolve a última carga usada (ou null).
+   * Endereço: o do cadastro (rua, complemento, bairro, CEP, cidade, estado em uma linha); sem endereço
+   * no cadastro, o da última carga. Agente: o do cadastro.
    */
   function applyCustomer(id: string, curCountry: string): LastLoad | null {
     setCustomer(id)
-    const c = p.customers.find((x) => x.value === id)
+    const c = p.customers.find((x) => String(x.id) === id)
     setAgentId(c?.agentId ?? '')
     const last = p.lastLoad?.[id] ?? null
     setFilledFrom(last)
-    setCustomerAddress(last?.customerAddress || c?.address || '')
+    setCustomerAddress(c?.address || last?.customerAddress || '')
     if (!last) {
-      if (c?.country && !curCountry) setCountry(c.country)
+      // sem última carga: o país do cadastro, a menos que o usuário tenha digitado outro destino
+      if (c?.country && (!curCountry || curCountry === countryAuto)) {
+        setCountry(c.country)
+        setCountryAuto(c.country)
+      }
       return null
     }
     setOriginPlace(last.originPlace)
@@ -134,7 +147,9 @@ export function NewPlanForm(p: {
       setArea(last.area)
       refForArea(last.area)
     }
-    setCountry(last.country || c?.country || curCountry)
+    const lastCountry = last.country || c?.country
+    setCountry(lastCountry || curCountry)
+    if (lastCountry) setCountryAuto(lastCountry)
     setIncoterm(last.incoterm)
     if (!typeTouched) {
       setService(last.service)
@@ -159,7 +174,7 @@ export function NewPlanForm(p: {
     /* eslint-disable react-hooks/set-state-in-effect -- leitura única do texto vindo da página principal */
     setAiText(t)
     // 1) cliente citado no texto ("camión completo para Danilo") → preenche com a última carga dele
-    const cid = customerInText(t, p.customers.map((c) => ({ id: Number(c.value), name: c.name })))
+    const cid = customerInText(t, p.customers.map((c) => ({ id: c.id, name: c.name })))
     const last = cid != null ? applyCustomer(String(cid), '') : null
     // 2) o que o texto disser explicitamente prevalece: país, modalidade e contêiner
     const c = countryInText(t)
@@ -236,18 +251,7 @@ export function NewPlanForm(p: {
           </label>
           <label className="field">
             Cliente
-            <select
-              name="customerId"
-              value={customer}
-              onChange={(e) => applyCustomer(e.target.value, country)}
-            >
-              <option value="">— novo cliente —</option>
-              {p.customers.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+            <CustomerPicker name="customerId" customers={p.customers} value={customer ? Number(customer) : null} onChange={(id) => applyCustomer(id == null ? '' : String(id), country)} />
           </label>
           {filledFrom && customer && (
             <div className="alert ok" style={{ gridColumn: '1 / -1', margin: 0 }}>
@@ -262,7 +266,7 @@ export function NewPlanForm(p: {
           )}
           <label className="field" style={{ gridColumn: '1 / -1' }}>
             Endereço do cliente
-            <input name="customerAddress" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="rua, número, cidade, país (sugerido do cadastro do cliente)" />
+            <input name="customerAddress" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="rua, número, bairro, CEP, cidade (sugerido do cadastro do cliente)" />
           </label>
           <label className="field">
             País de destino *

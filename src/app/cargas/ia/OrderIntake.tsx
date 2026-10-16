@@ -15,11 +15,13 @@ import { isService, serviceFromMode, SHIPMENT_SERVICES, TYPE_INFO } from '@/doma
 import { createFromIntakeAction } from './actions'
 import { originOrDefault, placeLabels } from '@/lib/places'
 import { CountryInput } from '@/components/CountryInput'
+import { CustomerPicker, type PickerCustomer } from '@/components/CustomerPicker'
 import { parseBrNumber, parseMm } from '@/domain/brNumber'
 
 interface Props {
   areas: Area[]
-  customers: { id: number; name: string; country: string }[]
+  /** clientes ativos; `address` = endereço do cadastro em uma linha (sugerido ao escolher o cliente) */
+  customers: (PickerCustomer & { country: string; address: string })[]
   equipment: { value: string; label: string; mode: string }[]
   catalog: { sku: string; name: string; unitsPerPackage: number; netKg: number }[]
 }
@@ -42,6 +44,17 @@ export function OrderIntake(p: Props) {
   const [notes, setNotes] = useState<string[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
+  /** endereço do cadastro do cliente (uma linha) */
+  const addressOf = (id: number | null) => (id != null ? p.customers.find((c) => c.id === id)?.address ?? '' : '')
+
+  /** troca o cliente; o endereço sugerido acompanha, a menos que o usuário já tenha escrito outro */
+  function chooseCustomer(id: number | null) {
+    setD((x) => {
+      const typed = (x.customerAddress ?? '').trim() !== '' && x.customerAddress !== addressOf(x.customerId)
+      return { ...x, customerId: id, customerAddress: typed ? x.customerAddress : addressOf(id) }
+    })
+  }
+
   async function addFiles(list: FileList | File[]) {
     const arr = await Promise.all([...list].map(shrinkImage))
     setFiles((f) => [...f, ...arr].slice(0, MAX_ATTACH))
@@ -57,7 +70,9 @@ export function OrderIntake(p: Props) {
     setD({
       area: d.area || (p.areas[0] ?? ''),
       customerId: x.customer.matchedId,
-      newCustomer: x.customer.matchedId ? '' : x.customer.name?.value ?? '',
+      // homônimos no cadastro: nada de cliente novo por padrão (seria um duplicado sem código) — o usuário
+      // escolhe um deles no seletor ou digita de propósito o nome de um cliente novo
+      newCustomer: x.customer.matchedId || (x.customer.homonyms ?? 0) > 1 ? '' : x.customer.name?.value ?? '',
       country: x.destination?.value ?? '',
       mode,
       incoterm: x.incoterm?.value ?? '',
@@ -65,6 +80,8 @@ export function OrderIntake(p: Props) {
       equipment: x.equipment && (!mode || (isService(mode) && TYPE_INFO[mode].equipment && eqMode === TYPE_INFO[mode].mode)) ? x.equipment.value : '',
       // exportação: "Proforma " pronto para completar o número (se o pedido não trouxer referência)
       orderRef: x.orderRef?.value ?? orderRefInitial(d.area || p.areas[0]),
+      // cliente reconhecido: endereço do cadastro (o usuário confere/edita)
+      customerAddress: addressOf(x.customer.matchedId),
       notes: x.notes ?? '',
     })
   }
@@ -132,7 +149,11 @@ export function OrderIntake(p: Props) {
     lengthMm: lenNum != null && !Number.isNaN(lenNum) ? lenNum : null,
     lines: lines.map((l) => ({ sku: l.sku, quantity: l.quantity, unit: l.unit, sourceText: l.sourceText })),
   }
-  const missing = res ? [...missingForCreate(draft), ...(numError ? [numError] : [])] : []
+  // homônimos no cadastro (mesma razão social, códigos diferentes): nenhum é escolhido sozinho
+  const homonyms = res?.customer.homonyms ?? 0
+  const missing = res
+    ? [...missingForCreate(draft).map((m) => (m === 'Cliente' && homonyms > 1 ? `Cliente (${homonyms} cadastrados com o nome do pedido: escolha o certo pelo código ou pela cidade)` : m)), ...(numError ? [numError] : [])]
+    : []
 
   async function create() {
     setBusy('create')
@@ -251,6 +272,13 @@ export function OrderIntake(p: Props) {
   const eqOpts = p.equipment.filter((e) => !svc || e.mode === TYPE_INFO[svc].mode)
   const pl = placeLabels(svc ? TYPE_INFO[svc].placeMode : d.mode)
   const custCountry = d.customerId ? p.customers.find((c) => c.id === d.customerId)?.country : res.customer.country?.value
+  // topo do seletor: os homônimos (vêm primeiro em `similar`) sob "Mesmo nome do pedido"; os parecidos à parte
+  const sim = res.customer.similar
+  const nHom = homonyms > 1 ? homonyms : 0
+  const featured = [
+    { label: 'Mesmo nome do pedido — escolha pelo código ou cidade', ids: sim.slice(0, nHom).map((c) => c.id) },
+    { label: 'Parecidos com o do pedido', ids: sim.slice(nHom).map((c) => c.id) },
+  ]
   const lacking = (ok: boolean) => (ok ? undefined : { borderColor: '#d62728', background: '#fff5f5' })
   const read = (f: ReadField<string> | null | undefined) => (f ? <small className="intake-ev" title={f.evidence ?? ''}>📄 lido do pedido{f.evidence ? `: “${f.evidence}”` : ''}</small> : <small className="intake-miss">não consta no pedido — informe</small>)
 
@@ -300,33 +328,32 @@ export function OrderIntake(p: Props) {
           )}
           <label className="field">
             Cliente *
-            <select value={d.customerId ?? ''} onChange={(e) => setD({ ...d, customerId: e.target.value ? Number(e.target.value) : null })} style={lacking(Boolean(d.customerId || d.newCustomer.trim()))}>
-              <option value="">— novo cliente —</option>
-              {res.customer.similar.length > 0 && (
-                <optgroup label="Parecidos com o do pedido">
-                  {res.customer.similar.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              <optgroup label="Cadastrados">
-                {p.customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {c.country ? ` (${c.country})` : ''}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-            {res.customer.matchedId ? <small className="intake-ev">✓ já cadastrado (nome do pedido: “{res.customer.name?.value}”)</small> : read(res.customer.name)}
+            <CustomerPicker
+              customers={p.customers}
+              value={d.customerId}
+              onChange={chooseCustomer}
+              featured={featured}
+              inputStyle={lacking(Boolean(d.customerId || d.newCustomer.trim()))}
+            />
+            {res.customer.matchedId ? (
+              <small className="intake-ev">✓ já cadastrado (nome do pedido: “{res.customer.name?.value}”)</small>
+            ) : homonyms > 1 && !d.customerId ? (
+              <small className="intake-miss">
+                {homonyms} clientes cadastrados com o nome “{res.customer.name?.value}”: escolha o certo pelo código ou pela cidade.
+              </small>
+            ) : (
+              read(res.customer.name)
+            )}
           </label>
           {!d.customerId && (
             <label className="field">
               Nome do novo cliente *
               <input value={d.newCustomer} onChange={(e) => setD({ ...d, newCustomer: e.target.value })} style={lacking(Boolean(d.newCustomer.trim()))} />
-              {res.customer.similar.length > 0 && <small className="intake-miss">Há clientes parecidos cadastrados — confira para não duplicar.</small>}
+              {homonyms > 1 ? (
+                <small className="intake-miss">Só para um cliente que não está no cadastro: os {homonyms} “{res.customer.name?.value}” cadastrados estão no seletor acima.</small>
+              ) : (
+                sim.length > 0 && <small className="intake-miss">Há clientes parecidos cadastrados — confira para não duplicar.</small>
+              )}
             </label>
           )}
           <label className="field">
@@ -427,7 +454,7 @@ export function OrderIntake(p: Props) {
           </label>
           <label className="field" style={{ gridColumn: '1 / -1' }}>
             Endereço do cliente
-            <input value={d.customerAddress ?? ''} onChange={(e) => setD({ ...d, customerAddress: e.target.value })} placeholder="rua, número, cidade, país" />
+            <input value={d.customerAddress ?? ''} onChange={(e) => setD({ ...d, customerAddress: e.target.value })} placeholder="rua, número, bairro, CEP, cidade (sugerido do cadastro do cliente)" />
           </label>
         </div>
         <label className="field" style={{ marginTop: 8 }}>
