@@ -59,6 +59,9 @@ table.data th, table.data td { padding: 7px 10px; border-bottom: 1px solid var(-
 table.data th { font-size: 12px; font-weight: 600; color: var(--muted); background: #fafbfc; position: sticky; top: 0; }
 table.data tr:hover td { background: #f8fafb; }
 table.compact td, table.compact th { padding: 4px 8px; }
+/* Catálogo logístico: o título da coluna quebra em linhas (colunas de números estreitas) e as células ficam numa linha só */
+table.data.catalog-table th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
+table.data.catalog-table th, table.data.catalog-table td { padding: 6px 8px; }
 
 button, .btn {
   display: inline-flex; align-items: center; gap: 6px; font: inherit; cursor: pointer;

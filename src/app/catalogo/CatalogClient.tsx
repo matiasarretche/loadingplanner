@@ -124,7 +124,7 @@ function NetKgCell({ r }: { r: CatalogRow }) {
       {p ? (p.netKg > 0 ? kg(p.netKg) : 'não informado') : '—'}
       {p && r.calcNetKg != null && (
         <>
-          <br />
+          {/* selo ao lado do peso (célula numa linha só) */}{' '}
           {isCalculatedNet(p.netKg, r.calcNetKg) ? (
             <span className="exp-src calc" title={`${formula} = ${nf2.format(r.calcNetKg)} kg`}>
               calculado
@@ -341,7 +341,7 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
                   Nenhum produto nesta família.
                 </p>
               ) : (
-                <table className="data">
+                <table className="data catalog-table">
                   <thead>
                     <tr>
                       <th>Cód.</th>
@@ -371,10 +371,9 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
                         <td>
                           <span className={`brand-tag ${r.brand === 'Pacifil' ? 'own' : ''}`}>{r.brand}</span>
                         </td>
-                        <td>
+                        {/* descrição numa linha só (a linha do produto já está no nome; fica na dica) */}
+                        <td style={{ whiteSpace: 'nowrap' }} title={r.line ? `Linha: ${r.line}` : undefined}>
                           {r.name}
-                          <br />
-                          <small className="muted">{r.line}</small>
                         </td>
                         <td title={r.tech || undefined} style={{ whiteSpace: 'nowrap' }}>
                           {r.spec || <span className="muted">—</span>}
@@ -390,7 +389,7 @@ export function CatalogClient({ families, rows, pallets, editable, showPrices }:
                         {showPrices && (
                           <td className="num" style={{ whiteSpace: 'nowrap' }}>{r.price != null ? `${r.priceCurrency} ${nf2.format(r.price)}${PRICE_UNIT_SHORT[r.priceUnit] ?? ''}` : <span className="muted">—</span>}</td>
                         )}
-                        <td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
                           {r.pack && <span className={`badge ${r.pack.verification}`}>{VERIFICATION_LABEL[r.pack.verification]}</span>}{' '}
                           {r.pack && <small className="muted">v{r.pack.version}</small>}
                         </td>
