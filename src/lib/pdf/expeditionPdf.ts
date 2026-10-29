@@ -97,7 +97,8 @@ export async function buildExpeditionPdf(doc: LoadDoc, model: ExpeditionModel, m
     ['Modalidade', MODE[meta.mode ?? ''] ?? meta.mode ?? '—'],
     ['Equipamento', `${S.code} — ${S.name}`],
     ['Medidas internas', `${nf(S.inner.l)} × ${nf(S.inner.w)} × ${nf(S.inner.h)} mm${S.baseInnerL != null ? ' (comprimento informado)' : ''}`],
-    ['Transportadora', meta.transportCompany || '—'],
+    // já rotulada (expeditionTransportLabel: DESTINATARIO = retirada pelo cliente…); sem condição de pagamento nem CFOP
+    ['Transportadora', meta.transportCompany || 'A definir'],
     ['Unidades', `${nf(model.totals.pallets)} palete(s)${model.totals.packages ? ` + ${nf(model.totals.packages)} volume(s) solto(s)` : ''} · ${nf(model.totals.boxes)} caixas`],
     ['Peso bruto (c/ paletes)', `${nf(model.totals.grossKg, 0)} kg`],
     ['Comprimento ocupado', `${nf(model.totals.usedLengthMm)} de ${nf(S.inner.l)} mm`],

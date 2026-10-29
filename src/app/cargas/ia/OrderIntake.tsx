@@ -1,12 +1,12 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { DictationButton } from '@/components/DictationButton'
 import { ATTACH_ACCEPT, ATTACH_HINT, fileIcon, interpretAttachments, MAX_ATTACH, pastedImages, shrinkImage, takePendingIntake } from '@/components/intake/attach'
 import { BODY_LIMITS, fmtMB, intakeSizeError } from '@/components/intake/limits'
 import { IntakeLines, IntakeRow, toRows } from '@/components/intake/IntakeLines'
-import { IntakeDraft, IntakeResult, missingForCreate, ReadField } from '@/domain/intake'
+import { commercialProblems, IntakeDraft, IntakeResult, missingForCreate, ReadField } from '@/domain/intake'
 import { Area, AREA_LABEL } from '@/lib/areas'
 import { orderRefFieldLabel, orderRefInitial, PROFORMA_PREFIX } from '@/lib/orderRef'
 import { lonaForArea, LONA_RULE_TEXT } from '@/domain/lonaRule'
@@ -17,6 +17,12 @@ import { originOrDefault, placeLabels } from '@/lib/places'
 import { CountryInput } from '@/components/CountryInput'
 import { CustomerPicker, type PickerCustomer } from '@/components/CustomerPicker'
 import { parseBrNumber, parseMm } from '@/domain/brNumber'
+import { TransportCompanyPicker, type PickerTransportCompany } from '@/components/TransportCompanyPicker'
+import { PaymentTermsFields } from '@/components/PaymentTermsFields'
+import type { PaymentTerms } from '@/domain/paymentTerms'
+import { CFOP_PLACEHOLDER, cfopAreaWarning, cfopError, normalizeCfop } from '@/domain/cfop'
+import { specialTransportCompanyIds } from '@/domain/transportCompany'
+import type { LastLoad } from '../nova/NewPlanForm'
 
 interface Props {
   areas: Area[]
@@ -24,6 +30,10 @@ interface Props {
   customers: (PickerCustomer & { country: string; address: string })[]
   equipment: { value: string; label: string; mode: string }[]
   catalog: { sku: string; name: string; unitsPerPackage: number; netKg: number }[]
+  /** transportadoras ativas do ERP (seletor com busca por nome ou código) */
+  companies?: PickerTransportCompany[]
+  /** última carga por cliente (id → dados): transportadora, condição de pagamento e CFOP sugeridos */
+  lastLoad?: Record<string, Pick<LastLoad, 'plan' | 'date' | 'transportCompanyId' | 'lastTransportCompanyId' | 'paymentTerms' | 'cfop'>>
 }
 
 
@@ -38,7 +48,12 @@ export function OrderIntake(p: Props) {
   const [drag, setDrag] = useState(false)
   const [res, setRes] = useState<IntakeResult | null>(null)
   const [lines, setLines] = useState<IntakeRow[]>([])
-  const [d, setD] = useState<Omit<IntakeDraft, 'lines'>>({ area: p.areas[0] ?? '', customerId: null, newCustomer: '', country: '', mode: '', incoterm: '', equipment: '', orderRef: orderRefInitial(p.areas[0]), originPlace: '', destinationPlace: '', customerAddress: '', notes: '' })
+  const [d, setD] = useState<Omit<IntakeDraft, 'lines'>>({ area: p.areas[0] ?? '', customerId: null, newCustomer: '', country: '', mode: '', incoterm: '', equipment: '', orderRef: orderRefInitial(p.areas[0]), originPlace: '', destinationPlace: '', customerAddress: '', notes: '', transportCompanyId: null, paymentTerms: null, cfop: '' })
+  // COMERCIAL (opcionais): transportadora, condição de pagamento (lida do pedido ou da última carga) e CFOP
+  // (nunca da IA: o da última carga do cliente). Trocar de cliente atualiza só o que o usuário não mexeu
+  const companies = useMemo(() => p.companies ?? [], [p.companies])
+  const specialIds = useMemo(() => specialTransportCompanyIds(companies), [companies])
+  const [touched, setTouched] = useState({ tc: false, terms: false, cfop: false })
   // endereço de coleta editado pelo usuário (senão, a fábrica no rodoviário)
   const [originTouched, setOriginTouched] = useState(false)
   const [notes, setNotes] = useState<string[]>([])
@@ -51,8 +66,23 @@ export function OrderIntake(p: Props) {
   function chooseCustomer(id: number | null) {
     setD((x) => {
       const typed = (x.customerAddress ?? '').trim() !== '' && x.customerAddress !== addressOf(x.customerId)
-      return { ...x, customerId: id, customerAddress: typed ? x.customerAddress : addressOf(id) }
+      return { ...x, ...commercialFor(id, res, touched, x), customerId: id, customerAddress: typed ? x.customerAddress : addressOf(id) }
     })
+  }
+
+  /**
+   * Transportadora, condição de pagamento e CFOP sugeridos para o cliente: os da última carga dele (a
+   * transportadora só se ainda ativa); a condição ESCRITA no pedido prevalece. Sem carga anterior: vazios.
+   * Campos já mexidos pelo usuário (`t`) ficam como estão.
+   */
+  function commercialFor(id: number | null, r: IntakeResult | null, t: typeof touched, cur: Pick<IntakeDraft, 'transportCompanyId' | 'paymentTerms' | 'cfop'>) {
+    const last = id != null ? p.lastLoad?.[String(id)] : undefined
+    const tcId = last?.transportCompanyId != null && companies.some((c) => c.id === last.transportCompanyId) ? last.transportCompanyId : null
+    return {
+      transportCompanyId: t.tc ? cur.transportCompanyId : tcId,
+      paymentTerms: t.terms ? cur.paymentTerms : r?.paymentTerms?.value ?? last?.paymentTerms ?? null,
+      cfop: t.cfop ? cur.cfop : last?.cfop ?? '',
+    }
   }
 
   async function addFiles(list: FileList | File[]) {
@@ -62,6 +92,9 @@ export function OrderIntake(p: Props) {
 
   function load(x: IntakeResult) {
     setRes(x)
+    // nova interpretação: os campos comerciais voltam a ser sugeridos (pedido / última carga do cliente)
+    const fresh = { tc: false, terms: false, cfop: false }
+    setTouched(fresh)
     setLines(toRows(x.lines))
     setOriginTouched(false)
     const eqMode = x.equipment ? p.equipment.find((e) => e.value === x.equipment!.value)?.mode : undefined
@@ -83,6 +116,7 @@ export function OrderIntake(p: Props) {
       // cliente reconhecido: endereço do cadastro (o usuário confere/edita)
       customerAddress: addressOf(x.customer.matchedId),
       notes: x.notes ?? '',
+      ...commercialFor(x.customer.matchedId, x, fresh, { transportCompanyId: null, paymentTerms: null, cfop: '' }),
     })
   }
 
@@ -143,6 +177,9 @@ export function OrderIntake(p: Props) {
   const originShown = originOrDefault(d.originPlace ?? '', svc0 ? TYPE_INFO[svc0].placeMode : d.mode, originTouched)
   const draft: IntakeDraft = {
     ...d,
+    // condição de pagamento só na Exportação; CFOP no formato N.NNN
+    paymentTerms: d.area === 'EXPORT' ? d.paymentTerms ?? null : null,
+    cfop: normalizeCfop(d.cfop),
     originPlace: originShown,
     maxHeightMm: hNum != null && !Number.isNaN(hNum) ? hNum : null,
     courierDivisor: divNum != null && !Number.isNaN(divNum) ? divNum : null,
@@ -152,7 +189,7 @@ export function OrderIntake(p: Props) {
   // homônimos no cadastro (mesma razão social, códigos diferentes): nenhum é escolhido sozinho
   const homonyms = res?.customer.homonyms ?? 0
   const missing = res
-    ? [...missingForCreate(draft).map((m) => (m === 'Cliente' && homonyms > 1 ? `Cliente (${homonyms} cadastrados com o nome do pedido: escolha o certo pelo código ou pela cidade)` : m)), ...(numError ? [numError] : [])]
+    ? [...missingForCreate(draft).map((m) => (m === 'Cliente' && homonyms > 1 ? `Cliente (${homonyms} cadastrados com o nome do pedido: escolha o certo pelo código ou pela cidade)` : m)), ...commercialProblems(draft), ...(numError ? [numError] : [])]
     : []
 
   async function create() {
@@ -278,6 +315,15 @@ export function OrderIntake(p: Props) {
   const featured = [
     { label: 'Mesmo nome do pedido — escolha pelo código ou cidade', ids: sim.slice(0, nHom).map((c) => c.id) },
     { label: 'Parecidos com o do pedido', ids: sim.slice(nHom).map((c) => c.id) },
+  ]
+  // comercial: CFOP (formato bloqueia, área só avisa), última carga do cliente e grupos do seletor de transportadoras
+  const cfopErr = cfopError(normalizeCfop(d.cfop))
+  const cfopWarn = cfopAreaWarning(normalizeCfop(d.cfop), d.area === 'DOMESTIC' ? 'DOMESTIC' : 'EXPORT')
+  const lastOfCustomer = d.customerId != null ? p.lastLoad?.[String(d.customerId)] : undefined
+  const lastTc = lastOfCustomer?.lastTransportCompanyId ?? null
+  const tcFeatured = [
+    { label: 'Última usada por este cliente', ids: lastTc != null ? [lastTc] : [] },
+    { label: 'Especiais', ids: specialIds },
   ]
   const lacking = (ok: boolean) => (ok ? undefined : { borderColor: '#d62728', background: '#fff5f5' })
   const read = (f: ReadField<string> | null | undefined) => (f ? <small className="intake-ev" title={f.evidence ?? ''}>📄 lido do pedido{f.evidence ? `: “${f.evidence}”` : ''}</small> : <small className="intake-miss">não consta no pedido — informe</small>)
@@ -417,9 +463,63 @@ export function OrderIntake(p: Props) {
             </label>
           )}
           <label className="field">
-            Transportadora (código ou nome) — opcional
-            <input value={d.transportCompany ?? ''} onChange={(e) => setD({ ...d, transportCompany: e.target.value })} placeholder="deixe em branco se ainda não definida" />
+            Transportadora — opcional
+            <TransportCompanyPicker
+              companies={companies}
+              value={d.transportCompanyId ?? null}
+              onChange={(id) => {
+                setD((x) => ({ ...x, transportCompanyId: id }))
+                setTouched((t) => ({ ...t, tc: true }))
+              }}
+              featured={tcFeatured}
+            />
+            {lastOfCustomer && d.transportCompanyId != null && d.transportCompanyId === lastOfCustomer.transportCompanyId && !touched.tc && <small className="muted">da última carga deste cliente ({lastOfCustomer.plan})</small>}
           </label>
+          <label className="field" title="CFOP do pedido (vale para todas as unidades). Uso interno/fiscal: não sai nos PDFs do cliente. Nunca é lido pela IA.">
+            CFOP — opcional
+            <input
+              value={d.cfop ?? ''}
+              onChange={(e) => {
+                setD((x) => ({ ...x, cfop: e.target.value }))
+                setTouched((t) => ({ ...t, cfop: true }))
+              }}
+              onBlur={() => setD((x) => ({ ...x, cfop: normalizeCfop(x.cfop) ?? '' }))}
+              placeholder={CFOP_PLACEHOLDER}
+              inputMode="decimal"
+              maxLength={12}
+              autoComplete="off"
+              aria-invalid={cfopErr ? true : undefined}
+              style={cfopErr ? { borderColor: 'var(--crit)' } : undefined}
+            />
+            {cfopErr ? (
+              <small style={{ color: 'var(--crit)' }}>{cfopErr}</small>
+            ) : cfopWarn ? (
+              <small style={{ color: '#b35f00' }}>{cfopWarn}</small>
+            ) : lastOfCustomer?.cfop && d.cfop === lastOfCustomer.cfop && !touched.cfop ? (
+              <small className="muted">da última carga deste cliente ({lastOfCustomer.plan}) — confira</small>
+            ) : (
+              <small className="muted">digitado à mão · uso interno/fiscal, não sai nos PDFs do cliente</small>
+            )}
+          </label>
+          {d.area === 'EXPORT' && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <PaymentTermsFields
+                idPrefix="ia-pagamento"
+                value={d.paymentTerms ?? null}
+                onChange={(t: PaymentTerms | null) => {
+                  setD((x) => ({ ...x, paymentTerms: t }))
+                  setTouched((x) => ({ ...x, terms: true }))
+                }}
+              />
+              {res.paymentTerms && !touched.terms ? (
+                read({ value: '', evidence: res.paymentTerms.evidence })
+              ) : !touched.terms && d.paymentTerms && lastOfCustomer?.paymentTerms ? (
+                <small className="muted">da última carga deste cliente ({lastOfCustomer.plan}) — confira</small>
+              ) : !d.paymentTerms ? (
+                <small className="muted">não consta no pedido — opcional</small>
+              ) : null}
+            </div>
+          )}
           {needsEq && <label className="field">
             Equipamento *
             <select value={d.equipment} onChange={(e) => setD({ ...d, equipment: e.target.value })} disabled={!d.mode} style={lacking(Boolean(d.equipment))}>

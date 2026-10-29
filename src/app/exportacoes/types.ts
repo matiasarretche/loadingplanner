@@ -5,7 +5,8 @@
  * Datas do seguimento: 'YYYY-MM-DD' (dia civil, sem fuso; formatar com fmtDate de @/domain/exportTracking).
  * Instantes (updatedAt, closedAt, eventos…): ISO 8601; mostrar com timeZone 'America/Sao_Paulo'.
  * Os dados comerciais (cliente, país, proforma, produtos, pesos, valor, Incoterm, portos, transportadora,
- * agente, criador da carga) são LIDOS da carga/pedido a cada consulta — nunca copiados para a operação.
+ * CFOP, condição de pagamento, agente, criador da carga) são LIDOS da carga/pedido a cada consulta — nunca
+ * copiados para a operação (editam-se na carga).
  */
 import type { ExportStatus, FieldSources } from '@/domain/exportTracking'
 import type { ShipmentService, TransportMode } from '@/domain/shipmentType'
@@ -37,8 +38,12 @@ export interface ExportRow {
   mode: TransportMode | null
   /** código do equipamento da última versão APROVADA (ex.: '40HC'); null se não houver */
   equipment: string | null
-  /** transportadora da carga ("CÓDIGO — Nome"), de load_plan.transport_company_id */
+  /** transportadora da carga, do ERP ("Nome · cód. 12", transportCompanyLabel), de load_plan.transport_company_id */
   transportCompany: string | null
+  /** CFOP do pedido (shipment.cfop, "7.101"): uso interno/fiscal — nunca no resumo para o cliente */
+  cfop: string | null
+  /** condição de pagamento da carga, em português (paymentTermsText); null = não informada ou usuário sem acesso a preços */
+  paymentTerms: string | null
   status: ExportStatus
   /** marcada como atrasada manualmente */
   delayed: boolean

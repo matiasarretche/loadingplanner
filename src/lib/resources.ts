@@ -3,7 +3,7 @@ import { canonicalCountry } from './countries'
 import { ORIENTATIONS } from '@/domain/geometry'
 
 /** Definição declarativa dos cadastros simples (lista + formulário genéricos). */
-export type FieldType = 'text' | 'textarea' | 'int' | 'decimal' | 'bool' | 'select' | 'date' | 'orientations' | 'country'
+export type FieldType = 'text' | 'textarea' | 'int' | 'decimal' | 'bool' | 'select' | 'date' | 'orientations' | 'country' | 'email'
 
 export interface Field {
   name: string
@@ -234,6 +234,10 @@ export const RESOURCES = {
       { name: 'city', label: 'Cidade', type: 'text', list: true, group: 'Endereço' },
       { name: 'state', label: 'Estado / Província', type: 'text', group: 'Endereço' },
       { name: 'country', label: 'País', type: 'country', list: true, group: 'Endereço' },
+      // pessoa com quem se fala (ex.: empresa e o dono/contato cadastrados como dois clientes no mesmo endereço)
+      { name: 'contactName', label: 'Nome do contato', type: 'text', group: 'Contato', help: 'Pessoa com quem se fala neste cliente.' },
+      { name: 'contactEmail', label: 'E-mail', type: 'email', group: 'Contato', help: 'Um ou mais, separados por ponto e vírgula (;).' },
+      { name: 'contactPhone', label: 'Telefone / WhatsApp', type: 'text', group: 'Contato', help: 'Com código do país (ex.: +598 99 123 456).' },
       { name: 'agentId', label: 'Agente (vendas com comissão)', type: 'select', optionsFrom: 'agents', group: 'Comercial', help: 'Se o cliente compra via agente, a cotização já inclui a comissão do agente.' },
       { name: 'active', label: 'Ativo', type: 'bool', list: true, group: 'Comercial' },
       { name: 'notes', label: 'Observações', type: 'textarea', group: 'Comercial' },
@@ -244,14 +248,23 @@ export const RESOURCES = {
     singular: 'transportadora',
     table: schema.transportCompanies,
     orderBy: 'code',
+    /** códigos do ERP são números: 1, 2, 10, 100 (não 1, 10, 100, 2) */
+    numericOrder: true,
     fields: [
-      { name: 'code', label: 'Código', type: 'text', required: true, list: true, help: 'Único. Usado para escolher a transportadora na carga.' },
+      {
+        name: 'code',
+        label: 'Código ERP',
+        type: 'text',
+        required: true,
+        list: true,
+        help: 'Código da transportadora no ERP. Único; é o vínculo com o ERP: não altere. O mesmo nome com códigos diferentes = filiais.',
+      },
       { name: 'name', label: 'Empresa', type: 'text', required: true, list: true },
       { name: 'contact', label: 'Contato', type: 'text', list: true },
       { name: 'phone', label: 'Telefone', type: 'text', list: true },
-      { name: 'email', label: 'E-mail', type: 'text', list: true },
+      { name: 'email', label: 'E-mail', type: 'email', list: true, help: 'Um ou mais, separados por ponto e vírgula (;).' },
       { name: 'active', label: 'Ativa', type: 'bool', list: true },
-      { name: 'notes', label: 'Observações', type: 'textarea' },
+      { name: 'notes', label: 'Observações', type: 'textarea', help: 'Ex.: filial / cidade, quando o nome se repete com outro código.' },
     ] as Field[],
   },
   agentes: {
@@ -274,6 +287,42 @@ export type ResourceKey = keyof typeof RESOURCES
 
 export function isResourceKey(k: string): k is ResourceKey {
   return k in RESOURCES
+}
+
+/** um único endereço de e-mail, sem espaços (nome@dominio.ext) */
+export function isEmail(s: string): boolean {
+  return s.length <= 254 && /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>.]{2,}$/.test(s)
+}
+
+/**
+ * Campo de e-mail com um ou mais endereços, separados por ";" ou "," (e "/" ou espaço dos cadastros antigos,
+ * ex.: "a@x.com / b@y.com"): os endereços e os pedaços que não são e-mail.
+ */
+export function splitEmails(s: string): { emails: string[]; invalid: string[] } {
+  const emails = s.split(/[\s;,/]+/).filter(Boolean)
+  return { emails, invalid: emails.filter((e) => !isEmail(e)) }
+}
+
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+
+/**
+ * Lista do cadastro: ordem (códigos do ERP em ordem NUMÉRICA quando o recurso pede) e busca simples
+ * (sem acento nem maiúsculas) nas colunas da lista + observações. Pura (testável).
+ */
+export function listRows<T extends Record<string, unknown>>(rows: T[], o: { fields: readonly Field[]; orderBy: string; numericOrder?: boolean; q?: string | null }): T[] {
+  const words = fold(o.q ?? '').split(/\s+/).filter(Boolean)
+  const keys = [...o.fields.filter((f) => f.list && f.type !== 'bool').map((f) => f.name), 'notes']
+  const hit = (r: T) => {
+    if (!words.length) return true
+    const hay = fold(keys.map((k) => (r[k] == null ? '' : String(r[k]))).join(' '))
+    return words.every((w) => hay.includes(w))
+  }
+  const out = rows.filter(hit)
+  if (o.numericOrder) {
+    const k = o.orderBy
+    out.sort((a, b) => String(a[k] ?? '').localeCompare(String(b[k] ?? ''), 'pt-BR', { numeric: true }))
+  }
+  return out
 }
 
 /** Converte FormData → objeto tipado conforme os campos, com mensagens em português. */
@@ -321,6 +370,11 @@ export function parseFields(fields: Field[], fd: FormData): { data: Record<strin
     } else if (f.type === 'date') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) errors[f.name] = 'Data inválida'
       else data[f.name] = str
+    } else if (f.type === 'email') {
+      // um ou mais endereços, cada um validado; grava no formato "a@x.com; b@y.com"
+      const { emails, invalid } = splitEmails(str)
+      if (!emails.length || invalid.length) errors[f.name] = `E-mail inválido${invalid.length ? `: ${invalid.map((e) => `“${e}”`).join(', ')}` : ''} (ex.: nome@empresa.com; outro@empresa.com)`
+      else data[f.name] = emails.join('; ')
     } else data[f.name] = str
   }
   return { data, errors }

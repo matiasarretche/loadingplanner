@@ -1,52 +1,80 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
-import { BALANCE_WHEN_OPTIONS, BalanceWhen, balanceWhenLabel, parseMoney, PaymentTerms, paymentTermsErrors, paymentTermsText } from '@/domain/paymentTerms'
+import { useMemo, useState } from 'react'
+import { parseMoney, PaymentTerms, paymentTermsErrors, paymentTermsText } from '@/domain/paymentTerms'
 import { proformaTotals } from '@/domain/pricing'
+import { CFOP_PLACEHOLDER, cfopAreaWarning, cfopError, normalizeCfop } from '@/domain/cfop'
+import { specialTransportCompany, specialTransportCompanyIds, transportCompanyLabel } from '@/domain/transportCompany'
+import { TransportCompanyPicker, type PickerTransportCompany } from '@/components/TransportCompanyPicker'
+import { PaymentTermsFields } from '@/components/PaymentTermsFields'
 import { setPlanAgentAction, updateCommercialAction } from '../actions'
+import { cfopEdit, termsKey } from './confirmCommercial'
 
 const usd = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const num = (v: number | null | undefined) => (v == null ? '' : String(v).replace('.', ','))
 const parse = (v: string) => parseMoney(v)
 
 /**
- * Proforma e transporte da carga: transportadora (por código ou nome), frete e seguro em USD (somados
- * uma vez ao subtotal da mercadoria) e condições de pagamento (saem escritas no idioma do PDF).
+ * Proforma, transporte e fiscal da carga: transportadora (busca entre as do ERP, vínculo pelo id), frete e
+ * seguro em USD (somados uma vez ao subtotal da mercadoria), condição de pagamento (só Exportação; sai
+ * escrita no idioma do PDF) e o CFOP do pedido (digitado à mão; uso interno/fiscal, não sai nos PDFs do
+ * cliente). Com mais de uma unidade no pedido: a condição de pagamento (Exportação) vale SEMPRE para todas
+ * as unidades; a transportadora é POR CARGA e a caixa "Aplicar a transportadora a todas as unidades" a leva às
+ * outras — marcada por padrão só quando elas já têm a mesma (senão desmarcada, com aviso). Frete e seguro
+ * continuam por unidade. O CFOP é do pedido e só é enviado se foi alterado aqui.
  */
 export function ProformaPanel(p: {
   planId: number
-  exportArea: boolean
+  area: 'EXPORT' | 'DOMESTIC'
   editable: boolean
   goodsUsd: number | null
   incoterm: string | null
-  companies: { id: number; code: string; name: string; active: boolean }[]
+  /** transportadoras ativas + a vinculada a esta carga (mesmo inativa) */
+  companies: PickerTransportCompany[]
   /** agentes (comissão incluída no preço desta carga) */
   agents: { id: number; name: string; active: boolean }[]
-  value: { agentId: number | null; transportCompanyId: number | null; freightUsd: number | null; insuranceUsd: number | null; paymentTerms: PaymentTerms | null }
+  /** quantidade de unidades (cargas) do pedido */
+  orderUnits: number
+  /** o pedido já foi confirmado (Exportações em curso) */
+  orderConfirmed: boolean
+  /** alguma outra unidade do pedido tem transportadora diferente desta */
+  carrierDiffers?: boolean
+  /** alguma outra unidade do pedido tem condição de pagamento diferente desta */
+  termsDiffer?: boolean
+  value: { agentId: number | null; transportCompanyId: number | null; freightUsd: number | null; insuranceUsd: number | null; paymentTerms: PaymentTerms | null; cfop: string | null }
 }) {
   const router = useRouter()
-  const cur = p.companies.find((c) => c.id === p.value.transportCompanyId)
-  const label = (c: { code: string; name: string }) => `${c.code} — ${c.name}`
-  const [company, setCompany] = useState(cur ? label(cur) : '')
+  const exportArea = p.area === 'EXPORT'
+  const byId = useMemo(() => new Map(p.companies.map((c) => [c.id, c])), [p.companies])
+  const cur = p.value.transportCompanyId != null ? byId.get(p.value.transportCompanyId) ?? null : null
+  // "Especiais" no topo do seletor: retirada pelo cliente, a definir, transporte próprio, Correios
+  const featured = useMemo(() => {
+    const ids = specialTransportCompanyIds(p.companies.filter((c) => c.active))
+    return ids.length ? [{ label: 'Especiais', ids }] : undefined
+  }, [p.companies])
+  const [companyId, setCompanyId] = useState<number | null>(p.value.transportCompanyId)
   const [agent, setAgent] = useState(p.value.agentId != null ? String(p.value.agentId) : '')
   const [freight, setFreight] = useState(num(p.value.freightUsd))
   const [insurance, setInsurance] = useState(num(p.value.insuranceUsd))
-  const t0 = p.value.paymentTerms
-  const [hasTerms, setHasTerms] = useState(Boolean(t0))
-  const [advance, setAdvance] = useState(t0 ? String(t0.advancePct) : '100')
-  const [when, setWhen] = useState<BalanceWhen>(t0?.balanceWhen ?? 'BEFORE_SHIPMENT')
-  const [days, setDays] = useState(t0?.days != null ? String(t0.days) : '')
-  const [note, setNote] = useState(t0?.note ?? '')
+  const [terms, setTerms] = useState<PaymentTerms | null>(p.value.paymentTerms)
+  const [cfop, setCfop] = useState(p.value.cfop ?? '')
+  // aplicar a transportadora às outras unidades: marcada só se não substitui nada (as outras já têm a mesma)
+  const [applyAll, setApplyAll] = useState(!p.carrierDiffers)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
 
-  const terms: PaymentTerms | null = hasTerms ? { advancePct: Number(advance.replace(',', '.')), balanceWhen: Number(advance.replace(',', '.')) >= 100 ? null : when, days: days.trim() ? Number(days) : null, note: note.trim() || null } : null
-  const termErrors = terms ? paymentTermsErrors(terms) : []
+  const t0 = p.value.paymentTerms
+  const termErrors = exportArea && terms ? paymentTermsErrors(terms) : []
   const f = parse(freight)
   const i = parse(insurance)
   const tot = proformaTotals(p.goodsUsd, Number.isNaN(f) ? null : f, Number.isNaN(i) ? null : i)
-  const resolved = company.trim() ? p.companies.find((c) => label(c).toLowerCase() === company.trim().toLowerCase() || c.code.toLowerCase() === company.trim().toLowerCase() || c.name.toLowerCase() === company.trim().toLowerCase()) : null
+  const chosen = companyId != null ? byId.get(companyId) ?? null : null
+  const cfopNorm = normalizeCfop(cfop)
+  const cfopErr = cfopError(cfopNorm)
+  const cfopWarn = cfopErr ? null : cfopAreaWarning(cfopNorm, p.area)
+  const multi = p.orderUnits > 1
+  const dis = !p.editable || busy
 
   /** agente: grava ao escolher (não depende do botão Salvar) e recalcula o preço */
   async function chooseAgent(v: string) {
@@ -68,47 +96,89 @@ export function ProformaPanel(p: {
   async function save() {
     setBusy(true)
     setMsg(null)
-    const r = await updateCommercialAction(p.planId, { transportCompany: company, freightUsd: freight, insuranceUsd: insurance, paymentTerms: terms }).catch(() => ({ ok: false as const, error: 'Falha de comunicação com o servidor.' }))
+    const toAll = multi && applyAll
+    const r = await updateCommercialAction(p.planId, {
+      transportCompanyId: companyId,
+      freightUsd: freight,
+      insuranceUsd: insurance,
+      // condição: só se editada aqui (senão o servidor mantém a gravada, que vale para todas as unidades); o
+      // Mercado Interno não a edita
+      ...(exportArea && termsKey(terms) !== termsKey(p.value.paymentTerms) ? { paymentTerms: terms } : {}),
+      // CFOP (é do pedido): só se editado aqui, com o valor que o painel carregou — um painel desatualizado
+      // não reverte o que outra pessoa gravou por outra unidade
+      ...(cfopEdit(cfop, p.value.cfop) ?? {}),
+      applyCarrierToOrder: toAll,
+    }).catch(() => ({ ok: false as const, error: 'Falha de comunicação com o servidor.' }))
     setBusy(false)
     if (!r.ok) return setMsg({ type: 'error', text: r.error })
-    setMsg({ type: 'ok', text: 'Salvo. O próximo PDF do pedido já sai com estes dados.' })
+    if (cfopNorm) setCfop(cfopNorm)
+    const units = `nas ${p.orderUnits} unidades do pedido`
+    const all = !multi
+      ? ''
+      : exportArea
+        ? toAll
+          ? `Transportadora e condição de pagamento gravadas ${units}. `
+          : `Condição de pagamento gravada ${units}; transportadora só nesta. `
+        : toAll
+          ? `Transportadora gravada ${units}. `
+          : ''
+    setMsg({ type: 'ok', text: `Salvo. ${all}O próximo PDF do pedido já sai com estes dados.` })
     router.refresh()
   }
 
   return (
     <details className="panel no-print" style={{ marginBottom: 8 }}>
       <summary style={{ cursor: 'pointer' }}>
-        <strong>{p.exportArea ? 'Proforma e transporte' : 'Transporte'}</strong>{' '}
+        <strong>{exportArea ? 'Proforma, transporte e fiscal' : 'Transporte e fiscal'}</strong>{' '}
         <span className="muted">
-          · transportadora {cur ? label(cur) : '—'}
-          {p.exportArea && (
+          · transportadora {cur ? transportCompanyLabel(cur) : '—'}
+          {exportArea && (
             <>
               {p.value.freightUsd ? ` · frete USD ${usd.format(p.value.freightUsd)}` : ''}
               {p.value.insuranceUsd ? ` · seguro USD ${usd.format(p.value.insuranceUsd)}` : ''}
-              {t0 ? ` · pagamento: ${paymentTermsText(t0, 'pt')}` : ' · condições de pagamento não definidas'}
+              {t0 ? ` · pagamento: ${paymentTermsText(t0, 'pt')}` : ' · condição de pagamento não definida'}
             </>
           )}
+          {` · CFOP ${p.value.cfop ?? 'não informado'}`}
         </span>
       </summary>
+      {p.orderConfirmed && p.editable && (
+        <div className="alert warn" style={{ margin: '8px 0 0' }}>
+          Pedido já confirmado (Exportações em curso): alterar aqui muda os próximos PDFs; as cotações já emitidas ficam como foram enviadas.
+        </div>
+      )}
       <div className="form-grid" style={{ marginTop: 8 }}>
         <label className="field">
-          Transportadora (código ou nome)
-          <input list={`tc-${p.planId}`} value={company} onChange={(e) => setCompany(e.target.value)} disabled={!p.editable || busy} placeholder="digite o código ou o nome" />
-          <datalist id={`tc-${p.planId}`}>
-            {p.companies
-              .filter((c) => c.active || c.id === p.value.transportCompanyId)
-              .map((c) => (
-                <option key={c.id} value={label(c)} />
-              ))}
-          </datalist>
-          {company.trim() && !resolved && <small style={{ color: 'var(--crit)' }}>não encontrada — cadastre em Cadastros → Transportadoras</small>}
-          {resolved && !resolved.active && <small style={{ color: '#b35f00' }}>transportadora inativa</small>}
+          Transportadora
+          <TransportCompanyPicker companies={p.companies} value={companyId} onChange={setCompanyId} featured={featured} disabled={dis} />
+          {chosen && !chosen.active && <small style={{ color: '#b35f00' }}>transportadora inativa</small>}
+          {chosen && specialTransportCompany(chosen) === 'to_define' && <small style={{ color: '#b35f00' }}>“A definir”: lembre de escolher a transportadora antes de confirmar o pedido.</small>}
         </label>
-        {p.exportArea && (
+        <label className="field" title="CFOP principal do pedido (natureza da operação na NF-e). Uso interno/fiscal: não sai nos PDFs do cliente.">
+          CFOP do pedido
+          <input
+            value={cfop}
+            onChange={(e) => setCfop(e.target.value)}
+            onBlur={() => cfopNorm && !cfopErr && setCfop(cfopNorm)}
+            disabled={dis}
+            placeholder={exportArea ? `ex.: ${CFOP_PLACEHOLDER}` : 'ex.: 5.101'}
+            maxLength={8}
+            inputMode="decimal"
+            style={{ borderColor: cfopErr ? 'var(--crit)' : undefined }}
+          />
+          {cfopErr ? (
+            <small style={{ color: 'var(--crit)' }}>{cfopErr}</small>
+          ) : cfopWarn ? (
+            <small style={{ color: '#b35f00' }}>{cfopWarn}</small>
+          ) : (
+            <small className="muted">vale para todas as unidades do pedido · uso interno, não sai nos PDFs do cliente</small>
+          )}
+        </label>
+        {exportArea && (
           <>
             <label className="field" title="Agente desta carga: a comissão dele (por família de produto) entra no preço. Vem do cadastro do cliente; pode ser trocado por carga.">
               Agente (comissão no preço)
-              <select value={agent} onChange={(e) => void chooseAgent(e.target.value)} disabled={!p.editable || busy}>
+              <select value={agent} onChange={(e) => void chooseAgent(e.target.value)} disabled={dis}>
                 <option value="">— sem agente —</option>
                 {p.agents
                   .filter((a) => a.active || String(a.id) === agent)
@@ -122,16 +192,18 @@ export function ProformaPanel(p: {
             </label>
             <label className="field">
               Frete (USD)
-              <input inputMode="decimal" value={freight} onChange={(e) => setFreight(e.target.value)} disabled={!p.editable || busy} placeholder="0,00" style={{ borderColor: Number.isNaN(f) ? 'var(--crit)' : undefined }} />
+              <input inputMode="decimal" value={freight} onChange={(e) => setFreight(e.target.value)} disabled={dis} placeholder="0,00" style={{ borderColor: Number.isNaN(f) ? 'var(--crit)' : undefined }} />
+              {multi && <small className="muted">só desta unidade</small>}
             </label>
             <label className="field">
               Seguro (USD)
-              <input inputMode="decimal" value={insurance} onChange={(e) => setInsurance(e.target.value)} disabled={!p.editable || busy} placeholder="0,00" style={{ borderColor: Number.isNaN(i) ? 'var(--crit)' : undefined }} />
+              <input inputMode="decimal" value={insurance} onChange={(e) => setInsurance(e.target.value)} disabled={dis} placeholder="0,00" style={{ borderColor: Number.isNaN(i) ? 'var(--crit)' : undefined }} />
+              {multi && <small className="muted">só desta unidade</small>}
             </label>
           </>
         )}
       </div>
-      {p.exportArea && (
+      {exportArea && (
         <>
           <p className="muted" style={{ margin: '4px 0' }}>
             Incoterm {p.incoterm ?? '—'} · mercadoria {p.goodsUsd != null ? `USD ${usd.format(p.goodsUsd)}` : 'sem preço'}
@@ -140,60 +212,33 @@ export function ProformaPanel(p: {
             {(tot.freightUsd || tot.insuranceUsd) && tot.totalUsd != null ? ` = total USD ${usd.format(tot.totalUsd)}` : ''}
             <span> · o PDF mostra o subtotal da mercadoria, o frete, o seguro e o total geral (cada valor somado uma única vez).</span>
           </p>
-          <fieldset style={{ marginTop: 6 }}>
-            <legend>
-              <label className="check">
-                <input type="checkbox" checked={hasTerms} onChange={(e) => setHasTerms(e.target.checked)} disabled={!p.editable || busy} /> Condições de pagamento
-              </label>
-            </legend>
-            {hasTerms && (
-              <>
-                <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                  <label className="field" style={{ width: 120 }}>
-                    % antecipado
-                    <input inputMode="decimal" value={advance} onChange={(e) => setAdvance(e.target.value)} disabled={!p.editable || busy} />
-                  </label>
-                  {Number(advance.replace(',', '.')) < 100 && (
-                    <>
-                      <label className="field">
-                        Saldo
-                        <select value={when} onChange={(e) => setWhen(e.target.value as BalanceWhen)} disabled={!p.editable || busy}>
-                          {BALANCE_WHEN_OPTIONS.map((w) => (
-                            <option key={w} value={w}>
-                              {balanceWhenLabel(w)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {when.startsWith('DAYS_') && (
-                        <label className="field" style={{ width: 90 }}>
-                          Dias
-                          <input inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} disabled={!p.editable || busy} />
-                        </label>
-                      )}
-                    </>
-                  )}
-                  <label className="field" style={{ flex: 1, minWidth: 220 }}>
-                    Nota livre (opcional; sai como digitada)
-                    <input value={note} onChange={(e) => setNote(e.target.value)} disabled={!p.editable || busy} maxLength={300} />
-                  </label>
-                </div>
-                {termErrors.length ? (
-                  <small style={{ color: 'var(--crit)' }}>{termErrors.join(' ')}</small>
-                ) : (
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    PDF — pt: {paymentTermsText(terms, 'pt')} · es: {paymentTermsText(terms, 'es')} · en: {paymentTermsText(terms, 'en')}
-                  </div>
-                )}
-              </>
-            )}
-          </fieldset>
+          <PaymentTermsFields value={terms} onChange={setTerms} disabled={dis} idPrefix={`pt-${p.planId}`} />
+          {multi && p.editable && (
+            <small className={p.termsDiffer ? undefined : 'muted'} style={{ display: 'block', color: p.termsDiffer ? '#b35f00' : undefined }}>
+              {p.termsDiffer
+                ? 'As outras unidades deste pedido têm outra condição de pagamento; ao salvar, a desta unidade passa a valer para todas.'
+                : `A condição de pagamento vale para todas as unidades do pedido (${p.orderUnits}).`}
+            </small>
+          )}
+        </>
+      )}
+      {multi && p.editable && (
+        <>
+          <label className="check" style={{ marginTop: 8 }}>
+            <input type="checkbox" checked={applyAll} onChange={(e) => setApplyAll(e.target.checked)} disabled={busy} />
+            Aplicar a transportadora a todas as unidades deste pedido ({p.orderUnits})
+          </label>
+          {p.carrierDiffers && <small style={{ display: 'block', color: '#b35f00' }}>As outras unidades deste pedido têm outra transportadora; marcar substitui a delas.</small>}
+          {/* inativa só continua onde já estava: o servidor recusa levá-la às outras unidades */}
+          {applyAll && p.carrierDiffers && chosen && !chosen.active && (
+            <small style={{ display: 'block', color: 'var(--crit)' }}>Transportadora inativa não pode ser aplicada às outras unidades: escolha uma ativa ou desmarque a opção.</small>
+          )}
         </>
       )}
       {msg && <div className={`alert ${msg.type}`} style={{ marginTop: 6 }}>{msg.text}</div>}
       {p.editable && (
-        <button className="primary" style={{ marginTop: 8 }} disabled={busy || termErrors.length > 0 || Number.isNaN(f) || Number.isNaN(i) || (company.trim() !== '' && !resolved)} onClick={() => void save()}>
-          {busy ? 'Salvando…' : 'Salvar proforma e transporte'}
+        <button className="primary" style={{ marginTop: 8 }} disabled={busy || termErrors.length > 0 || Number.isNaN(f) || Number.isNaN(i) || Boolean(cfopErr)} onClick={() => void save()}>
+          {busy ? 'Salvando…' : exportArea ? 'Salvar proforma, transporte e fiscal' : 'Salvar transporte e fiscal'}
         </button>
       )}
     </details>

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { db, schema } from '@/db'
 import { dt } from '@/components/format'
+import { transportCompanyLabel } from '@/domain/transportCompany'
 import { ResourceForm } from '@/components/ResourceForm'
 import { requireUser } from '@/lib/auth'
 import { isResourceKey, RESOURCES } from '@/lib/resources'
@@ -33,8 +34,15 @@ export default async function ResourceEdit({ params }: PageProps<'/cadastros/[re
     agents: (await db.select().from(schema.agents).orderBy(asc(schema.agents.name))).map((a) => ({ value: String(a.id), label: `${a.name}${a.active ? '' : ' (inativo)'}` })),
   }
   const action = saveResourceAction.bind(null, recurso, isNew ? null : Number(id))
-  // cliente: "código do ERP — razão social" (o código sozinho não diz quem é); demais cadastros: código ou nome
-  const title = isNew ? '' : recurso === 'clientes' ? [row!.code, row!.name].filter(Boolean).map(String).join(' — ') : String(row!.code ?? row!.name)
+  // cliente: "código do ERP — razão social" (o código sozinho não diz quem é); transportadora: "Empresa · cód. N"
+  // (o mesmo nome se repete nas filiais); demais cadastros: código ou nome
+  const title = isNew
+    ? ''
+    : recurso === 'clientes'
+      ? [row!.code, row!.name].filter(Boolean).map(String).join(' — ')
+      : recurso === 'transportadoras'
+        ? transportCompanyLabel({ code: String(row!.code ?? ''), name: String(row!.name ?? '') })
+        : String(row!.code ?? row!.name)
   return (
     <>
       <div className="page-head">

@@ -378,6 +378,10 @@ export const customers = pgTable('customer', {
   address: text('address'),
   addressComplement: text('address_complement'),
   taxId: text('tax_id'),
+  /** contato do cliente (pessoa com quem se fala, ex.: o dono de uma empresa cadastrada também como pessoa) */
+  contactName: text('contact_name'),
+  contactEmail: text('contact_email'),
+  contactPhone: text('contact_phone'),
   /** agente que intermedia as vendas a este cliente (comissão incluída no preço da cotização) */
   agentId: integer('agent_id').references(() => agents.id),
   active: boolean('active').notNull().default(true),
@@ -406,6 +410,8 @@ export const shipments = pgTable('shipment', {
   orderRef: text('order_ref'),
   destinationCountry: text('destination_country').notNull(),
   incoterm: text('incoterm').notNull(),
+  /** CFOP da operação ("7.101"), digitado ao criar a carga; vale para todas as unidades do pedido (uso interno/fiscal) */
+  cfop: text('cfop'),
   /** modalidade (null em só paletes / courier) */
   mode: transportModeEnum('mode'),
   service: shipmentServiceEnum('service').notNull().default('FCL'),

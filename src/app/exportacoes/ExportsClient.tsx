@@ -108,7 +108,7 @@ function quickTest(q: Quick, { r, s }: Item, month: string): boolean {
 function matches({ r }: Item, f: Filters, tab: Tab, periodBy: PeriodBy): boolean {
   const q = norm(f.q.trim())
   if (q) {
-    const hay = norm(`${r.customer} ${r.orderRef ?? ''} ${r.planName} ${r.bookingNumber ?? ''} ${r.blNumber ?? ''} ${r.containerNumber ?? ''} ${r.country}`)
+    const hay = norm(`${r.customer} ${r.orderRef ?? ''} ${r.planName} ${r.bookingNumber ?? ''} ${r.blNumber ?? ''} ${r.containerNumber ?? ''} ${r.country} ${r.transportCompany ?? ''} ${r.cfop ?? ''}`)
     // contêiner/booking digitados com espaço ("MSCU 123…") também encontram
     if (!hay.includes(q) && !hay.replace(/\s/g, '').includes(q.replace(/\s/g, ''))) return false
   }
@@ -203,10 +203,16 @@ function OrderCell({ r }: { r: ExportRow }) {
         <Link href={`/exportacoes/${r.id}`} className="dash-plan">
           {r.orderRef ?? r.planName}
         </Link>
-        <small className="muted" style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.planName}>
+        <small className="muted" style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[r.planName, r.cfop && `CFOP ${r.cfop}`, r.paymentTerms && `Condição de pagamento: ${r.paymentTerms}`].filter(Boolean).join('\n')}>
           {r.orderRef ? `${r.planName} · ` : ''}
           {TYPE_INFO[r.service].short} · {r.incoterm}
+          {r.cfop ? ` · CFOP ${r.cfop}` : ''}
         </small>
+        {r.transportCompany && (
+          <small className="muted" style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`Transportadora: ${r.transportCompany}`}>
+            <Icon name="truck" size={12} /> {r.transportCompany}
+          </small>
+        )}
       </span>
     </span>
   )
@@ -313,6 +319,9 @@ const CSV_EXTRA: { label: string; csv: (x: Item) => string | number }[] = [
   { label: 'Carga', csv: ({ r }) => r.planName },
   { label: 'Tipo', csv: ({ r }) => TYPE_INFO[r.service].short },
   { label: 'Incoterm', csv: ({ r }) => r.incoterm },
+  { label: 'CFOP', csv: ({ r }) => r.cfop ?? '' },
+  { label: 'Transportadora (ERP)', csv: ({ r }) => r.transportCompany ?? '' },
+  { label: 'Condição de pagamento', csv: ({ r }) => r.paymentTerms ?? '' },
   { label: 'Booking', csv: ({ r }) => r.bookingNumber ?? '' },
   { label: 'BL', csv: ({ r }) => r.blNumber ?? '' },
   { label: 'Lacre', csv: ({ r }) => r.sealNumber ?? '' },

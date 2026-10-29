@@ -4,6 +4,8 @@
  */
 import type { PackSnapshot } from './types'
 import { isService, serviceFromMode, TYPE_INFO } from './shipmentType'
+import { cfopError, normalizeCfop } from './cfop'
+import { PaymentTerms, paymentTermsErrors } from './paymentTerms'
 
 /** Unidade em que o cliente pediu a quantidade. */
 export type QtyUnit = 'UNIT' | 'BOX' | 'PALLET' | 'KG' | 'OTHER'
@@ -63,6 +65,8 @@ export interface IntakeResult {
   destination: ReadField | null
   mode: ReadField<'SEA' | 'ROAD' | 'AIR' | 'LCL' | 'ROAD_LTL' | 'AIR_LOOSE' | 'COURIER'> | null
   incoterm: ReadField | null
+  /** condição de pagamento ESCRITA no pedido (estruturada, com o trecho); nunca deduzida. O CFOP nunca vem da IA */
+  paymentTerms: ReadField<PaymentTerms> | null
   /** equipamento citado: valor = "CONTAINER:id" / "VEHICLE:id" quando reconhecido no cadastro */
   equipment: (ReadField & { label: string }) | null
   /** texto do equipamento citado mas não reconhecido (para perguntar) */
@@ -91,8 +95,12 @@ export interface IntakeDraft {
   courierDivisor?: number | null
   /** caminhão: comprimento útil real (mm), se diferente do cadastro */
   lengthMm?: number | null
-  /** transportadora (código ou nome; opcional) */
-  transportCompany?: string
+  /** transportadora do ERP escolhida no seletor (id; opcional — null = a definir) */
+  transportCompanyId?: number | null
+  /** condição de pagamento (só Exportação; opcional): lida do pedido ou a da última carga do cliente */
+  paymentTerms?: PaymentTerms | null
+  /** CFOP do pedido digitado à mão (opcional; nunca deduzido pela IA) */
+  cfop?: string | null
   orderRef: string
   /** porto/aeroporto/endereço de origem e destino (conforme a modalidade) e endereço do cliente */
   originPlace?: string
@@ -119,6 +127,19 @@ export function missingForCreate(d: IntakeDraft): string[] {
     if (!l.quantity || l.quantity <= 0) m.push(`${n}: quantidade`)
     if (l.unit === 'OTHER') m.push(`${n}: unidade da quantidade`)
   })
+  return m
+}
+
+/**
+ * Dados comerciais OPCIONAIS que, se preenchidos errado, impedem criar: CFOP fora do formato e condição de
+ * pagamento incompleta (só Exportação — no Mercado Interno ela não é gravada). Avisos de área do CFOP não entram.
+ */
+export function commercialProblems(d: Pick<IntakeDraft, 'area' | 'paymentTerms' | 'cfop'>): string[] {
+  const m: string[] = []
+  const cfop = cfopError(normalizeCfop(d.cfop))
+  if (cfop) m.push(cfop)
+  const terms = d.area === 'EXPORT' && d.paymentTerms ? paymentTermsErrors(d.paymentTerms) : []
+  if (terms.length) m.push(`Condição de pagamento: ${terms.join(' ')}`)
   return m
 }
 

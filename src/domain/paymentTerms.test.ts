@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseMoney, paymentTermsErrors, paymentTermsText } from './paymentTerms'
+import { checkPaymentTerms, normalizePaymentTerms, parseMoney, paymentTermsErrors, paymentTermsFromAi, paymentTermsText } from './paymentTerms'
 import { proformaTotals } from './pricing'
 
 describe('condições de pagamento (no idioma do PDF)', () => {
@@ -43,5 +43,30 @@ describe('proforma: frete e seguro somados uma única vez', () => {
     expect(proformaTotals(10000, null, null)).toMatchObject({ totalUsd: 10000 })
     expect(proformaTotals(null, null, null)).toMatchObject({ totalUsd: null })
     expect(proformaTotals(null, 1500, 0)).toMatchObject({ totalUsd: null })
+  })
+})
+
+describe('condição normalizada (mesma forma em todos os caminhos)', () => {
+  it('100% antecipado: sem saldo nem dias; nota aparada', () => {
+    expect(normalizePaymentTerms({ advancePct: '100', balanceWhen: 'AGAINST_DOCS', days: '30', note: '  ' })).toEqual({ advancePct: 100, balanceWhen: null, days: null, note: null })
+  })
+  it('vírgula decimal, dias só em "a N dias"', () => {
+    expect(normalizePaymentTerms({ advancePct: '12,5', balanceWhen: 'AGAINST_DOCS', days: 30 })).toEqual({ advancePct: 12.5, balanceWhen: 'AGAINST_DOCS', days: null, note: null })
+    expect(normalizePaymentTerms({ advancePct: 30, balanceWhen: 'DAYS_AFTER_INVOICE', days: '60', note: ' Banco Itaú ' })).toEqual({ advancePct: 30, balanceWhen: 'DAYS_AFTER_INVOICE', days: 60, note: 'Banco Itaú' })
+  })
+  it('ausente → null; inválida passa adiante para ser acusada', () => {
+    expect([normalizePaymentTerms(null), normalizePaymentTerms(undefined), normalizePaymentTerms('x')]).toEqual([null, null, null])
+    expect(checkPaymentTerms(null)).toEqual({ ok: true, terms: null })
+    expect(checkPaymentTerms({ advancePct: '', balanceWhen: 'BEFORE_SHIPMENT' })).toMatchObject({ ok: false })
+    expect(checkPaymentTerms({ advancePct: 30, balanceWhen: 'XYZ' })).toMatchObject({ ok: false })
+    expect(checkPaymentTerms({ advancePct: 30, balanceWhen: 'DAYS_AFTER_SHIPMENT', days: '' })).toMatchObject({ ok: false })
+    expect(checkPaymentTerms({ advancePct: 30, balanceWhen: 'AGAINST_DOCS' })).toEqual({ ok: true, terms: { advancePct: 30, balanceWhen: 'AGAINST_DOCS', days: null, note: null } })
+  })
+  it('saída da IA', () => {
+    expect(paymentTermsFromAi({ advance_pct: 30, balance_when: 'AGAINST_DOCS' })).toEqual({ advancePct: 30, balanceWhen: 'AGAINST_DOCS', days: null, note: null })
+    expect(paymentTermsFromAi({ advance_pct: 0, balance_when: 'DAYS_AFTER_SHIPMENT', days: 60.4 })).toEqual({ advancePct: 0, balanceWhen: 'DAYS_AFTER_SHIPMENT', days: 60, note: null })
+    expect(paymentTermsFromAi({ advance_pct: 100, balance_when: 'INVENTADO' })).toEqual({ advancePct: 100, balanceWhen: null, days: null, note: null })
+    expect(paymentTermsFromAi({ balance_when: 'AGAINST_DOCS' })).toBeNull()
+    expect(paymentTermsFromAi(null)).toBeNull()
   })
 })

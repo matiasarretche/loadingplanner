@@ -24,6 +24,9 @@ import { unitNoun } from '@/lib/units'
 import { autoPlanName, normalizeOrderRef } from '@/lib/orderRef'
 import { placeValue } from '@/lib/places'
 import { CUSTOMER_ADDRESS_FIELDS } from '@/domain/customerAddress'
+import { checkPaymentTerms } from '@/domain/paymentTerms'
+import { cfopError, normalizeCfop } from '@/domain/cfop'
+import { resolveTransportCompany } from '@/lib/transportCompanies'
 
 const draftSchema = z.object({
   area: z.string(),
@@ -36,7 +39,11 @@ const draftSchema = z.object({
   maxHeightMm: z.number().int().min(300).max(4000).nullable().optional(),
   courierDivisor: z.number().int().min(1000).max(10000).nullable().optional(),
   lengthMm: z.number().int().min(2000).max(25000).nullable().optional(),
-  transportCompany: z.string().trim().max(160).optional(),
+  // transportadora do ERP: o id escolhido no seletor (nunca pelo nome — filiais repetem o nome)
+  transportCompanyId: z.number().int().positive().nullable().optional(),
+  // condição de pagamento (normalizada e validada abaixo) e CFOP do pedido (digitado à mão)
+  paymentTerms: z.unknown().optional(),
+  cfop: z.string().trim().max(20).nullable().optional(),
   orderRef: z.string().trim().max(80),
   originPlace: z.string().trim().max(300).optional(),
   destinationPlace: z.string().trim().max(300).optional(),
@@ -87,16 +94,17 @@ export async function createFromIntakeAction(raw: IntakeDraft): Promise<IntakeCr
     if (!space) return { ok: false, error: 'O equipamento não corresponde à modalidade escolhida.' }
     // caminhão: comprimento útil real informado
     if (space.kind === 'VEHICLE' && d.lengthMm) space = withVehicleLength({ space, limits: [], packs: {}, pallets: {}, units: [] }, d.lengthMm).space
-    // transportadora (opcional): código ou nome cadastrado
-    let transportCompanyId: number | null = null
-    if (d.transportCompany?.trim()) {
-      const q = d.transportCompany.trim()
-      const all = await db.select().from(schema.transportCompanies)
-      const code = q.split(' — ')[0].trim().toLowerCase()
-      const hit = all.find((c) => c.code.toLowerCase() === code) ?? all.find((c) => c.name.toLowerCase() === q.toLowerCase())
-      if (!hit) return { ok: false, error: `Transportadora "${q}" não cadastrada (cadastre em Cadastros → Transportadoras ou deixe em branco).` }
-      transportCompanyId = hit.id
-    }
+    // transportadora (opcional): pelo id, ativa
+    const tc = await resolveTransportCompany(d.transportCompanyId ?? null)
+    if ('error' in tc) return { ok: false, error: tc.error }
+    const transportCompanyId = tc.id
+    // condição de pagamento (só Exportação; opcional) e CFOP do pedido (opcional; N.NNN) — gravados como na Nova carga
+    const pt = checkPaymentTerms(area === 'EXPORT' ? d.paymentTerms : null)
+    if (!pt.ok) return { ok: false, error: pt.error }
+    const paymentTerms = pt.terms
+    const cfop = normalizeCfop(d.cfop)
+    const cfopErr = cfopError(cfop)
+    if (cfopErr) return { ok: false, error: cfopErr }
 
     // quantidades do cliente → unidades de produto (determinístico; paletes completos pelo palete da regra)
     const logistics = mode ? resolveLogistics({ mode, destination: d.country }) : null
@@ -181,14 +189,14 @@ export async function createFromIntakeAction(raw: IntakeDraft): Promise<IntakeCr
       }
       const [sh] = await tx
         .insert(schema.shipments)
-        .values({ customerId, orderRef, destinationCountry: d.country, incoterm: d.incoterm, mode, service, area, originPlace: placeValue(d.originPlace), destinationPlace: placeValue(d.destinationPlace), customerAddress: placeValue(d.customerAddress), notes: d.notes || null, createdBy: me.id, updatedBy: me.id })
+        .values({ customerId, orderRef, destinationCountry: d.country, incoterm: d.incoterm, cfop, mode, service, area, originPlace: placeValue(d.originPlace), destinationPlace: placeValue(d.destinationPlace), customerAddress: placeValue(d.customerAddress), notes: d.notes || null, createdBy: me.id, updatedBy: me.id })
         .returning({ id: schema.shipments.id })
       const ids: number[] = []
       for (const [k, doc] of docs.entries()) {
         const ev = evaluateDoc(doc)
         const [lp] = await tx
           .insert(schema.loadPlans)
-          .values({ shipmentId: sh.id, name: docs.length > 1 ? `${baseName} · ${unitNoun(doc.space)} ${k + 1}` : baseName, agentId: customer?.agentId ?? null, transportCompanyId, createdBy: me.id, updatedBy: me.id })
+          .values({ shipmentId: sh.id, name: docs.length > 1 ? `${baseName} · ${unitNoun(doc.space)} ${k + 1}` : baseName, agentId: customer?.agentId ?? null, transportCompanyId, paymentTerms, createdBy: me.id, updatedBy: me.id })
           .returning({ id: schema.loadPlans.id })
         await tx.insert(schema.loadPlanVersions).values({
           loadPlanId: lp.id,
@@ -209,7 +217,7 @@ export async function createFromIntakeAction(raw: IntakeDraft): Promise<IntakeCr
       return ids
     })
     await lockPackagingVersions(docs.flatMap(packagingIds))
-    await logAudit('load_plan', planIds[0], 'create_from_intake', me.id, { planIds, lines: d.lines.length, units: Object.fromEntries(units) })
+    await logAudit('load_plan', planIds[0], 'create_from_intake', me.id, { planIds, lines: d.lines.length, units: Object.fromEntries(units), transportCompanyId, paymentTerms, cfop })
     revalidatePath('/')
     return { ok: true, planId: planIds[0], units: docs.length, notes }
   } catch (e) {

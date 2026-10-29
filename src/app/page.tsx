@@ -17,6 +17,7 @@ export default async function Dashboard({ searchParams }: PageProps<'/'>) {
       me={{ id: u.id, areas: userAreas(u) }}
       canEdit={can.editPlans(u.role)}
       canApprove={can.approve(u.role)}
+      canViewPrices={can.viewPrices(u.role)}
       permissionError={sp.erro === 'permissao'}
     />
   )

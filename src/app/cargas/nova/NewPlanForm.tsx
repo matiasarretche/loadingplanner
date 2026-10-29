@@ -1,15 +1,20 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useActionState, useEffect, useMemo, useState } from 'react'
 import { canonicalCountry, countryInText } from '@/lib/countries'
 import { customerInText, serviceInText } from '@/domain/intake'
 import { Area, AREA_LABEL } from '@/lib/areas'
 import { INCOTERMS } from '@/lib/constants'
-import { createPlanAction, quickTransportCompanyAction } from '../actions'
+import { createPlanAction } from '../actions'
 import { orderRefFieldLabel, orderRefInitial, PROFORMA_PREFIX } from '@/lib/orderRef'
 import { originOrDefault, placeLabels } from '@/lib/places'
 import { CountryInput } from '@/components/CountryInput'
 import { CustomerPicker, type PickerCustomer } from '@/components/CustomerPicker'
+import { TransportCompanyPicker, type PickerTransportCompany } from '@/components/TransportCompanyPicker'
+import { PaymentTermsFields } from '@/components/PaymentTermsFields'
+import { normalizePaymentTerms, PaymentTerms, paymentTermsErrors } from '@/domain/paymentTerms'
+import { CFOP_PLACEHOLDER, cfopAreaWarning, cfopError, normalizeCfop } from '@/domain/cfop'
+import { specialTransportCompanyIds } from '@/domain/transportCompany'
 import { DEFAULT_COURIER_DIVISOR, isNoEquipment, isService, SHIPMENT_SERVICES, ShipmentService, TYPE_INFO } from '@/domain/shipmentType'
 
 interface Opt {
@@ -35,6 +40,22 @@ export interface LastLoad {
   profiles: string[]
   plan: string
   date: string
+  /** transportadora e condição de pagamento da última carga; CFOP do pedido dela */
+  transportCompanyId: number | null
+  /** última transportadora usada pelo cliente (pode ser de uma carga anterior à última) */
+  lastTransportCompanyId: number | null
+  paymentTerms: PaymentTerms | null
+  cfop: string | null
+}
+
+/** condição de pagamento que voltou do servidor (JSON do campo oculto) */
+function termsFromField(v: string | undefined): PaymentTerms | null {
+  if (!v) return null
+  try {
+    return normalizePaymentTerms(JSON.parse(v))
+  } catch {
+    return null
+  }
 }
 
 /** Cliente ativo para o seletor: `address` = endereço do cadastro já em uma linha (formatCustomerAddress). */
@@ -54,22 +75,22 @@ export function NewPlanForm(p: {
   areas: Area[]
   /** última carga por cliente (id do cliente → dados) */
   lastLoad?: Record<string, LastLoad>
-  /** transportadoras ativas ("CÓDIGO — Nome") */
-  companies?: string[]
+  /** transportadoras ativas do ERP (seletor com busca por nome ou código) */
+  companies?: PickerTransportCompany[]
   /** tipo pedido na URL (?tipo=LCL…) */
   initialService?: ShipmentService
 }) {
   const [state, action, pending] = useActionState(createPlanAction, {})
   const v = state.values ?? {}
-  // transportadora: vazia = segue; não cadastrada = alerta (cadastrar agora ou seguir sem cadastrar)
-  const [companies, setCompanies] = useState(p.companies ?? [])
-  const [tc, setTc] = useState(v.transportCompany ?? '')
-  const [tcSkip, setTcSkip] = useState(v.transportSkip === '1')
-  const [tcNew, setTcNew] = useState<{ code: string; name: string } | null>(null)
-  const [tcMsg, setTcMsg] = useState<string | null>(null)
-  const tcq = tc.trim().toLowerCase()
-  const tcKnown = !tcq || companies.some((c) => c.toLowerCase() === tcq || c.split(' — ')[0].trim().toLowerCase() === tcq || (c.split(' — ')[1] ?? '').trim().toLowerCase() === tcq)
-  const tcPending = !tcKnown && !tcSkip
+  // COMERCIAL (opcionais): transportadora do ERP (id), condição de pagamento (só Exportação) e CFOP do pedido.
+  // Ao escolher o cliente vêm da última carga dele (sem carga anterior: vazios), menos o que o usuário já mexeu
+  const companies = useMemo(() => p.companies ?? [], [p.companies])
+  const [tcId, setTcId] = useState<number | null>(Number(v.transportCompanyId) || null)
+  const [terms, setTerms] = useState<PaymentTerms | null>(() => termsFromField(v.paymentTerms))
+  const [cfop, setCfop] = useState(v.cfop ?? '')
+  const [touched, setTouched] = useState({ tc: v.transportCompanyId != null, terms: v.paymentTerms != null, cfop: v.cfop != null })
+  const specialIds = useMemo(() => specialTransportCompanyIds(companies), [companies])
+  const [clientError, setClientError] = useState<string | null>(null)
   const [area, setArea] = useState<Area>((v.area as Area) ?? p.areas[0] ?? 'EXPORT')
   // TIPO DE ENVIO: com equipamento (editor 3D) ou sem (paletes mistos / volumes)
   const [service, setService] = useState<ShipmentService>(isService(v.service) ? v.service : p.initialService ?? (area === 'DOMESTIC' ? 'ROAD' : 'FCL'))
@@ -118,11 +139,24 @@ export function NewPlanForm(p: {
     if (touched) setTypeTouched(true)
   }
   const cur = eqOpts.find((o) => o.value === equipment) ?? eqOpts[0]
+  // CFOP: o formato bloqueia; a área só avisa. Condição de pagamento inválida também bloqueia
+  const cfopValue = normalizeCfop(cfop)
+  const cfopErr = cfopError(cfopValue)
+  const cfopWarn = cfopAreaWarning(cfopValue, area)
+  const termsOn = area === 'EXPORT' ? terms : null
+  const termsErr = termsOn ? paymentTermsErrors(termsOn) : []
+  // topo do seletor de transportadoras: a última usada por este cliente e as situações especiais do ERP
+  const lastTc = customer ? p.lastLoad?.[customer]?.lastTransportCompanyId ?? null : null
+  const tcFeatured = [
+    { label: 'Última usada por este cliente', ids: lastTc != null ? [lastTc] : [] },
+    { label: 'Especiais', ids: specialIds },
+  ]
   /**
    * Escolhe o cliente e preenche com a sua última carga (área, destino, Incoterm, modalidade,
    * equipamento e limites). Devolve a última carga usada (ou null).
    * Endereço: o do cadastro (rua, complemento, bairro, CEP, cidade, estado em uma linha); sem endereço
-   * no cadastro, o da última carga. Agente: o do cadastro.
+   * no cadastro, o da última carga. Agente: o do cadastro. Transportadora, condição de pagamento e CFOP: os da
+   * última carga (sem carga anterior: vazios), menos os que o usuário já mexeu.
    */
   function applyCustomer(id: string, curCountry: string): LastLoad | null {
     setCustomer(id)
@@ -131,6 +165,10 @@ export function NewPlanForm(p: {
     const last = p.lastLoad?.[id] ?? null
     setFilledFrom(last)
     setCustomerAddress(c?.address || last?.customerAddress || '')
+    // transportadora (só se ainda ativa), condição de pagamento e CFOP da última carga; sem carga anterior: vazios
+    if (!touched.tc) setTcId(last?.transportCompanyId != null && companies.some((x) => x.id === last.transportCompanyId) ? last.transportCompanyId : null)
+    if (!touched.terms) setTerms(last?.paymentTerms ?? null)
+    if (!touched.cfop) setCfop(last?.cfop ?? '')
     if (!last) {
       // sem última carga: o país do cadastro, a menos que o usuário tenha digitado outro destino
       if (c?.country && (!curCountry || curCountry === countryAuto)) {
@@ -201,11 +239,10 @@ export function NewPlanForm(p: {
     <form
       action={action}
       onSubmit={(e) => {
-        // transportadora não cadastrada: decidir antes de criar
-        if (tcPending) {
-          e.preventDefault()
-          setTcMsg('Transportadora não cadastrada: cadastre-a ou escolha "Seguir sem cadastrar".')
-        }
+        // CFOP ou condição de pagamento inválidos: corrigir antes de criar (o servidor também confere)
+        const err = cfopErr ?? (termsErr.length ? `Condição de pagamento: ${termsErr.join(' ')}` : null)
+        setClientError(err)
+        if (err) e.preventDefault()
       }}
     >
       {state.error && <div className="alert error">{state.error}</div>}
@@ -297,6 +334,59 @@ export function NewPlanForm(p: {
               ))}
             </select>
           </label>
+          <label className="field">
+            Transportadora — opcional
+            <TransportCompanyPicker
+              name="transportCompanyId"
+              companies={companies}
+              value={tcId}
+              onChange={(id) => {
+                setTcId(id)
+                setTouched((t) => ({ ...t, tc: true }))
+              }}
+              featured={tcFeatured}
+            />
+          </label>
+          <label className="field" title="CFOP do pedido (vale para todas as unidades). Uso interno/fiscal: não sai nos PDFs do cliente.">
+            CFOP — opcional
+            <input
+              name="cfop"
+              value={cfop}
+              onChange={(e) => {
+                setCfop(e.target.value)
+                setTouched((t) => ({ ...t, cfop: true }))
+                setClientError(null)
+              }}
+              onBlur={() => setCfop(cfopValue ?? '')}
+              placeholder={CFOP_PLACEHOLDER}
+              inputMode="decimal"
+              maxLength={12}
+              autoComplete="off"
+              aria-invalid={cfopErr ? true : undefined}
+              style={cfopErr ? { borderColor: 'var(--crit)' } : undefined}
+            />
+            {cfopErr ? (
+              <small style={{ color: 'var(--crit)' }}>{cfopErr}</small>
+            ) : cfopWarn ? (
+              <small style={{ color: '#b35f00' }}>{cfopWarn}</small>
+            ) : (
+              <small className="muted">uso interno/fiscal — não sai nos PDFs do cliente</small>
+            )}
+          </label>
+          {area === 'EXPORT' && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <PaymentTermsFields
+                idPrefix="nova-pagamento"
+                value={terms}
+                onChange={(t) => {
+                  setTerms(t)
+                  setTouched((x) => ({ ...x, terms: true }))
+                  setClientError(null)
+                }}
+              />
+            </div>
+          )}
+          <input type="hidden" name="paymentTerms" value={termsOn ? JSON.stringify(termsOn) : ''} />
         </div>
       </fieldset>
       <fieldset>
@@ -357,84 +447,14 @@ export function NewPlanForm(p: {
               : 'Depois de criar, abre o planejador de paletes mistos: informe o pedido e o sistema monta os paletes (salvos nesta carga).'}
           </p>
         )}
-        <div className="form-grid">
-          {equipment.startsWith('VEHICLE:') && (
+        {equipment.startsWith('VEHICLE:') && (
+          <div className="form-grid">
             <label className="field">
               Comprimento útil do caminhão (mm) — opcional
               <input name="lengthMm" inputMode="decimal" defaultValue={v.lengthMm} placeholder="o do cadastro; digite o real se for diferente" />
             </label>
-          )}
-          <label className="field">
-            Transportadora (código ou nome) — opcional
-            <input
-              name="transportCompany"
-              list="tc-nova"
-              value={tc}
-              onChange={(e) => {
-                setTc(e.target.value)
-                setTcSkip(false)
-                setTcNew(null)
-                setTcMsg(null)
-              }}
-              placeholder="digite o código ou o nome"
-              style={tcPending ? { borderColor: '#b35f00' } : undefined}
-            />
-            <input type="hidden" name="transportSkip" value={tcSkip ? '1' : ''} />
-            <datalist id="tc-nova">
-              {companies.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-            {!tcKnown && (
-              <div className="alert warn" style={{ marginTop: 4, fontSize: 12, padding: '6px 8px' }}>
-                {tcSkip ? (
-                  <>
-                    Seguindo sem cadastrar: “{tc.trim()}” fica nas observações do pedido.{' '}
-                    <button type="button" className="small link" onClick={() => setTcSkip(false)}>
-                      desfazer
-                    </button>
-                  </>
-                ) : tcNew ? (
-                  <>
-                    <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-                      <input value={tcNew.code} onChange={(e) => setTcNew({ ...tcNew, code: e.target.value })} placeholder="Código *" style={{ width: 90 }} />
-                      <input value={tcNew.name} onChange={(e) => setTcNew({ ...tcNew, name: e.target.value })} placeholder="Nome *" style={{ flex: 1, minWidth: 120 }} />
-                      <button
-                        type="button"
-                        className="small primary"
-                        onClick={async () => {
-                          const r = await quickTransportCompanyAction(tcNew).catch(() => ({ ok: false as const, error: 'Falha de comunicação com o servidor.' }))
-                          if (!r.ok) return setTcMsg(r.error)
-                          setCompanies((xs) => [...xs, r.label])
-                          setTc(r.label)
-                          setTcNew(null)
-                          setTcMsg(null)
-                        }}
-                      >
-                        Cadastrar
-                      </button>
-                      <button type="button" className="small" onClick={() => setTcNew(null)}>
-                        Cancelar
-                      </button>
-                    </div>
-                    <small className="muted">Os demais dados (contato, telefone, e-mail) podem ser completados em Cadastros → Transportadoras.</small>
-                  </>
-                ) : (
-                  <>
-                    <strong>“{tc.trim()}” não está cadastrada.</strong>{' '}
-                    <button type="button" className="small" onClick={() => setTcNew(/^[\w-]{1,12}$/.test(tc.trim()) ? { code: tc.trim().toUpperCase(), name: '' } : { code: '', name: tc.trim() })}>
-                      Cadastrar agora
-                    </button>{' '}
-                    <button type="button" className="small" onClick={() => setTcSkip(true)}>
-                      Seguir sem cadastrar
-                    </button>
-                  </>
-                )}
-                {tcMsg && <div style={{ color: 'var(--crit)', marginTop: 4 }}>{tcMsg}</div>}
-              </div>
-            )}
-          </label>
-        </div>
+          </div>
+        )}
         <div className="form-grid">
           <label className="field">
             {pl.origin}
@@ -470,6 +490,7 @@ export function NewPlanForm(p: {
         Observações
         <textarea name="notes" rows={2} defaultValue={v.notes} />
       </label>
+      {clientError && <div className="alert error">{clientError}</div>}
       <button className="primary" disabled={pending || (!noEq && !equipment)}>
         {noEq ? (service === 'COURIER' ? 'Criar e informar os volumes' : 'Criar e montar os paletes') : 'Criar plano e abrir editor 3D'}
       </button>

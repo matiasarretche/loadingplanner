@@ -9,8 +9,8 @@ const DESC: Record<string, string> = {
   cavalos: 'Cavalos mecânicos: entre-eixos, 5ª roda e taras por eixo (distribuição de peso).',
   'limites-eixo': 'Limites legais por conjunto de eixos e PBTC, por país (Brasil, MERCOSUL…).',
   perfis: 'Limites de transportador, legais, de rota e tolerâncias operacionais de validação.',
-  clientes: 'Clientes: código do ERP, razão social, endereço e agente (vendas com comissão).',
-  transportadoras: 'Empresas transportadoras: código, contato, telefone e e-mail. Escolhidas em cada carga.',
+  clientes: 'Clientes: código do ERP, razão social, endereço, contato e agente (vendas com comissão).',
+  transportadoras: 'Transportadoras do ERP (código + empresa; filiais com códigos diferentes), contato, telefone e e-mail. Escolhidas em cada carga.',
   agentes: 'Agentes comerciais: as exceções de comissão ficam em Preços exportação.',
 }
 

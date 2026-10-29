@@ -2,11 +2,13 @@ import 'server-only'
 import { desc, eq, inArray, sql } from 'drizzle-orm'
 import { db, schema } from '@/db'
 import type { DashRow } from '@/app/DashboardClient'
+import { paymentTermsText } from '@/domain/paymentTerms'
+import { transportCompanyLabel } from '@/domain/transportCompany'
 import { userAreas } from './areas'
 import { avatarRef } from './avatar'
 import type { CurrentUser } from './auth'
 import { operationIdsByPlan } from './exportTracking'
-import { canSeeExports } from './roles'
+import { can, canSeeExports } from './roles'
 
 /** Dias sem alteração para um rascunho/revisão ser considerado "parado". */
 export const STALE_DAYS = 7
@@ -52,7 +54,15 @@ export async function dashboardRows(u: CurrentUser): Promise<DashRow[]> {
     db.select({ id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar }).from(schema.users),
     canSeeExports(u) ? operationIdsByPlan(rows.filter((r) => r.shipment.area === 'EXPORT').map((r) => r.plan.id)) : null,
   ])
-  const companies = new Map((await db.select({ id: schema.transportCompanies.id, code: schema.transportCompanies.code, name: schema.transportCompanies.name }).from(schema.transportCompanies)).map((c) => [c.id, `${c.code} — ${c.name}`]))
+  // só as transportadoras usadas nestas cargas (o cadastro do ERP tem centenas)
+  const usedCompanies = [...new Set(rows.map((r) => r.plan.transportCompanyId).filter((x): x is number => x != null))]
+  const companies = new Map(
+    usedCompanies.length
+      ? (await db.select({ id: schema.transportCompanies.id, code: schema.transportCompanies.code, name: schema.transportCompanies.name }).from(schema.transportCompanies).where(inArray(schema.transportCompanies.id, usedCompanies))).map((c) => [c.id, transportCompanyLabel(c)])
+      : [],
+  )
+  // condição de pagamento e CFOP: dados comerciais/fiscais — não vão ao navegador de quem não vê preços (Expedição)
+  const commercial = can.viewPrices(u.role)
   const users = new Map(userRows.map((x) => [x.id, x.name]))
   const avatars = new Map(userRows.map((x) => [x.id, avatarRef(x.id, x.avatar)]))
   const latest = new Map<number, (typeof versions)[number]>()
@@ -84,6 +94,8 @@ export async function dashboardRows(u: CurrentUser): Promise<DashRow[]> {
         orderRef: shipment.orderRef,
         transportCompany: plan.transportCompanyId ? companies.get(plan.transportCompanyId) ?? null : null,
         incoterm: shipment.incoterm,
+        cfop: commercial ? (shipment.cfop ?? null) : null,
+        paymentTerms: commercial ? paymentTermsText(plan.paymentTerms, 'pt') : null,
         mode: shipment.service,
         area: shipment.area,
         equipment: v.document.space.code,

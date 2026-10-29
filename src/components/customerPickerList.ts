@@ -1,5 +1,5 @@
 /**
- * Lista do seletor de clientes (CustomerPicker), sem React: que opções aparecem e em que ordem.
+ * Lista dos seletores com busca (SearchPicker: clientes, transportadoras), sem React: que opções aparecem e em que ordem.
  * Separada do componente para poder ser testada.
  */
 

@@ -5,6 +5,7 @@ import { db, schema } from '@/db'
 import { commissionOutsideUsual, COMMISSION_USUAL, PricingConfig, quotePrice, roundUpUsd, twinsWithSnapshot } from '@/domain/exportPricing'
 import { commissionAgentId, FrozenPricing, orderValue, orderValueFromPrices, PriceResolution, proformaTotals, quoteSignatureInput, QuoteSnapshotLine, skuQuantities } from '@/domain/pricing'
 import { PaymentTerms, paymentTermsText, TermsLang } from '@/domain/paymentTerms'
+import { transportCompanyLabel } from '@/domain/transportCompany'
 import type { LoadDoc } from '@/domain/types'
 import { countryCode } from './countries'
 import type { IssuedQuote } from '@/components/quotes/QuoteView'
@@ -204,7 +205,7 @@ export async function recordIssuedQuote(
       insuranceUsd: totals.insuranceUsd,
       grandTotalUsd: totals.totalUsd,
       paymentTerms: paymentTermsText(data.plan.paymentTerms, termsLang(lang)),
-      transportCompany: tc ? `${tc.code} — ${tc.name}` : null,
+      transportCompany: tc ? transportCompanyLabel(tc) : null,
       commissionUsd: pv.value.commissionUsd || null,
       lines,
       signature: '',

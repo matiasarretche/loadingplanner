@@ -96,10 +96,10 @@ export const MAX_TEXT = 500
 export const MAX_NOTES = 2000
 
 const COLS = CUSTOMER_SHEET_COLUMNS.length
-const letter = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : `${String.fromCharCode(64 + Math.floor(i / 26))}${String.fromCharCode(65 + (i % 26))}`)
+export const letter = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : `${String.fromCharCode(64 + Math.floor(i / 26))}${String.fromCharCode(65 + (i % 26))}`)
 
 /** texto do cabeçalho comparável: Unicode composto, espaços repetidos viram um, sem espaços nas pontas */
-const headText = (v: CellValue | undefined) => (v == null ? '' : String(v).normalize('NFC').replace(/\s+/g, ' ').trim())
+export const headText = (v: CellValue | undefined) => (v == null ? '' : String(v).normalize('NFC').replace(/\s+/g, ' ').trim())
 
 /** Problemas do cabeçalho (linha 1). Lista vazia = cabeçalho igual ao modelo. */
 export function headerProblems(header: CellValue[]): string[] {
@@ -122,7 +122,7 @@ const PLACEHOLDER = /^[.\-–—_]+$/
  * Texto de uma célula: número → texto (inteiro sem casas); texto → Unicode composto, sem espaços nas pontas e
  * (fora das Observações) numa linha só, com espaços repetidos reduzidos. Vazio → null.
  */
-function cellText(v: CellValue | undefined, multiline: boolean): { value: string | null; placeholder: boolean } {
+export function cellText(v: CellValue | undefined, multiline: boolean): { value: string | null; placeholder: boolean } {
   if (v == null) return { value: null, placeholder: false }
   if (typeof v === 'number') return { value: Number.isFinite(v) ? (Number.isInteger(v) ? v.toFixed(0) : String(v)) : null, placeholder: false }
   let t = String(v).normalize('NFC')
@@ -141,7 +141,7 @@ function cellText(v: CellValue | undefined, multiline: boolean): { value: string
 }
 
 /** valor de erro do Excel (gravado como erro ou colado como texto): #N/A, #REF!… (também em pt-BR/es) */
-const EXCEL_ERROR = /^#[¡¿]?(N\/A|N\/D|NULL!|NULO!|DIV\/0!|VALUE!|VALOR!|REF!|NAME\?|NOME\?|NOMBRE\?|NUM!|NÚM!|SPILL!|DESPEJAR!|CALC!|GETTING_DATA|FIELD!|CAMPO!|BLOCKED!|CONNECT!|BUSY!|UNKNOWN!)$/i
+export const EXCEL_ERROR = /^#[¡¿]?(N\/A|N\/D|NULL!|NULO!|DIV\/0!|VALUE!|VALOR!|REF!|NAME\?|NOME\?|NOMBRE\?|NUM!|NÚM!|SPILL!|DESPEJAR!|CALC!|GETTING_DATA|FIELD!|CAMPO!|BLOCKED!|CONNECT!|BUSY!|UNKNOWN!)$/i
 
 /** separa as seções de um formato do Excel (";" fora de aspas) */
 function formatSections(fmt: string): string[] {
@@ -226,7 +226,7 @@ export const nameKey = (s: string) =>
     .trim()
 
 /** agrupa linhas por chave, mantendo a ordem da primeira aparição */
-function group(list: { key: string; row: number }[]): Map<string, number[]> {
+export function group(list: { key: string; row: number }[]): Map<string, number[]> {
   const m = new Map<string, number[]>()
   for (const x of list) m.set(x.key, [...(m.get(x.key) ?? []), x.row])
   return m

@@ -41,7 +41,7 @@ export interface CustomerSheetFile {
 const sha256 = (buf: Buffer) => createHash('sha256').update(buf).digest('hex')
 
 /** fórmula sem resultado no arquivo (o ExcelJS lê igual uma fórmula nunca calculada e uma com resultado "") */
-const formulaWithoutValue = (v: unknown) => typeof v === 'object' && v !== null && ('formula' in v || 'sharedFormula' in v) && (v as { result?: unknown }).result === undefined
+export const formulaWithoutValue = (v: unknown) => typeof v === 'object' && v !== null && ('formula' in v || 'sharedFormula' in v) && (v as { result?: unknown }).result === undefined
 
 /**
  * Lê a PRIMEIRA aba do .xlsx: linha 1 = cabeçalho; as outras linhas com algum valor = dados (células da

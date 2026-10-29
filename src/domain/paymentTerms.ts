@@ -67,6 +67,58 @@ export function paymentTermsErrors(t: PaymentTerms): string[] {
   return e
 }
 
+/** número digitado ("30", "12,5") ou já numérico; vazio/ausente → NaN (acusado por paymentTermsErrors) */
+const toNum = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v.trim().replace(',', '.')) : NaN)
+
+/**
+ * Condição vinda da tela, do formulário (JSON) ou da IA → forma gravada, IGUAL em todos os caminhos (criação,
+ * pedido por IA, divisão em unidades e painel da carga): { advancePct, balanceWhen, days, note }.
+ * 100% antecipado → sem saldo (balanceWhen null); dias só para "a N dias" com saldo; nota aparada (vazia → null).
+ * Valores inválidos NÃO são corrigidos aqui: passam para paymentTermsErrors acusar. Ausente/não-objeto → null.
+ */
+export function normalizePaymentTerms(raw: unknown): PaymentTerms | null {
+  if (!raw || typeof raw !== 'object') return null
+  const t = raw as Record<string, unknown>
+  const advancePct = toNum(t.advancePct)
+  const bw = t.balanceWhen == null || t.balanceWhen === '' ? null : (String(t.balanceWhen) as BalanceWhen)
+  const balanceWhen = advancePct >= 100 ? null : bw
+  const d = toNum(t.days)
+  const days = balanceWhen?.startsWith('DAYS_') && Number.isFinite(d) ? d : null
+  const note = t.note == null ? null : String(t.note).trim() || null
+  return { advancePct, balanceWhen, days, note }
+}
+
+/** Normaliza e valida (servidor): condição pronta para gravar (null = sem condição) ou o erro para a tela. */
+export function checkPaymentTerms(raw: unknown): { ok: true; terms: PaymentTerms | null } | { ok: false; error: string } {
+  const terms = normalizePaymentTerms(raw)
+  if (!terms) return { ok: true, terms: null }
+  const errs = paymentTermsErrors(terms)
+  return errs.length ? { ok: false, error: `Condição de pagamento: ${errs.join(' ')}` } : { ok: true, terms }
+}
+
+/**
+ * Esquema (JSON Schema) da condição para as ferramentas da IA — o mesmo do assistente da lista de preços:
+ * % antecipado, quando se paga o saldo (BALANCE_WHEN_OPTIONS), dias (só DAYS_*) e nota livre.
+ */
+export const PAYMENT_TERMS_AI_SCHEMA = {
+  type: 'object',
+  properties: { advance_pct: { type: 'number', minimum: 0, maximum: 100 }, balance_when: { type: 'string', enum: BALANCE_WHEN_OPTIONS }, days: { type: 'integer', minimum: 1, maximum: 720 }, note: { type: 'string', maxLength: 300 } },
+  required: ['advance_pct'],
+  additionalProperties: false,
+}
+
+/** texto da IA para explicar as opções de balance_when (em <dados> / no prompt) */
+export const BALANCE_WHEN_AI_HELP =
+  'BEFORE_SHIPMENT (antes do embarque), AGAINST_DOCS (contra cópia dos documentos/BL), ON_ARRIVAL (na chegada), DAYS_AFTER_SHIPMENT (N dias após o embarque), DAYS_AFTER_INVOICE (N dias após a fatura), LC_AT_SIGHT (carta de crédito à vista)'
+
+/** Saída da IA ({ advance_pct, balance_when, days, note }) → condição (null se não houver % antecipado). Validar depois. */
+export function paymentTermsFromAi(p: { advance_pct?: unknown; balance_when?: unknown; days?: unknown; note?: unknown } | null | undefined): PaymentTerms | null {
+  if (!p || typeof p.advance_pct !== 'number' || !Number.isFinite(p.advance_pct)) return null
+  const adv = Math.min(100, Math.max(0, p.advance_pct))
+  const bw = BALANCE_WHEN_OPTIONS.find((w) => w === p.balance_when) ?? null
+  return normalizePaymentTerms({ advancePct: adv, balanceWhen: bw, days: typeof p.days === 'number' ? Math.round(p.days) : null, note: typeof p.note === 'string' ? p.note.slice(0, 300) : null })
+}
+
 /** Texto da condição de pagamento no idioma (ex.: "30% de anticipo y 70% antes del embarque"). */
 export function paymentTermsText(t: PaymentTerms | null | undefined, lang: TermsLang): string | null {
   if (!t) return null

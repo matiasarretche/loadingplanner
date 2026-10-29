@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import Link from 'next/link'
 import { COMPANY, instagramUrl } from '@/lib/pdf/i18n'
 import { notFound } from 'next/navigation'
@@ -7,6 +8,10 @@ import { SEVERITY_LABEL, sortIssues } from '@/domain/issues'
 import { loadGeometries, roadAxles, validateLoad } from '@/domain/load'
 import { AXLE_GROUP_LABEL } from '@/domain/axles'
 import { requireUser } from '@/lib/auth'
+import { db, schema } from '@/db'
+import { paymentTermsText } from '@/domain/paymentTerms'
+import { transportCompanyLabel } from '@/domain/transportCompany'
+import { can } from '@/lib/roles'
 import { serviceOf, TYPE_INFO } from '@/domain/shipmentType'
 import { loadPlanVersion } from '@/lib/planData'
 import { canAccessPlan } from '@/lib/access'
@@ -33,6 +38,13 @@ export default async function ResumoPage({ params, searchParams }: PageProps<'/c
   const bySku = [...s.bySku].sort((a, b) => rankOf(rank, a.sku) - rankOf(rank, b.sku))
   const geoms = loadGeometries(doc).sort((a, b) => a.box.min.x - b.box.min.x || a.box.min.y - b.box.min.y || a.box.min.z - b.box.min.z)
   const L = s.limits
+  // transportadora para todos (inclusive Expedição); CFOP e condição de pagamento só para quem vê preços,
+  // e a condição de pagamento só na Exportação (o Mercado Interno não a tem)
+  const company = plan.transportCompanyId ? await db.query.transportCompanies.findFirst({ where: eq(schema.transportCompanies.id, plan.transportCompanyId), columns: { code: true, name: true } }) : undefined
+  const commercial = can.viewPrices(u.role)
+  const showTerms = commercial && shipment?.area === 'EXPORT'
+  const cfop = commercial ? (shipment?.cfop ?? null) : null
+  const terms = showTerms ? paymentTermsText(plan.paymentTerms, 'pt') : null
   return (
     <>
       <div className="row no-print" style={{ marginBottom: 12 }}>
@@ -47,6 +59,11 @@ export default async function ResumoPage({ params, searchParams }: PageProps<'/c
         <p className="muted" style={{ marginTop: 0 }}>
           Cliente {customer?.name} · {shipment?.destinationCountry} · Incoterm {shipment?.incoterm} · {TYPE_INFO[serviceOf(shipment)].label}
           {shipment?.orderRef && ` · ${orderRefLabel(shipment.orderRef, shipment.area)}`} · gerado em {dt(new Date())} por {u.name}
+        </p>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Transportadora {company ? transportCompanyLabel(company) : 'a definir'}
+          {commercial && <> · CFOP {cfop ?? 'não informado'}</>}
+          {showTerms && <> · Condição de pagamento: {terms ?? 'não informada'}</>}
         </p>
         <h2>Equipamento</h2>
         <table className="data compact">

@@ -4,14 +4,17 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { confirmOrderAction } from '@/app/exportacoes/actions'
 import { todayBR } from '@/domain/exportTracking'
+import { transportCompanyLabel } from '@/domain/transportCompany'
+import { confirmWarnings, type ConfirmCommercial } from './confirmCommercial'
 
 /**
  * "Confirmar pedido" na página da carga (Exportações em curso): o cliente confirmou o pedido e a carga
  * passa a ter seguimento. Exige versão APROVADA (o servidor confere de novo). Pede a data da confirmação
  * (padrão: hoje em São Paulo), o recebimento do pagamento (opcional) e, quando há, se confirma junto as
- * outras cargas aprovadas do mesmo pedido que ainda não foram confirmadas.
+ * outras cargas aprovadas do mesmo pedido que ainda não foram confirmadas. Mostra, só para conferir,
+ * a condição de pagamento, o CFOP e a transportadora, com avisos que NÃO bloqueiam (faltando ou “A definir”).
  */
-export function ConfirmOrderButton({ planId, siblings, className = 'small primary' }: { planId: number; siblings: { loadPlanId: number; label: string }[]; className?: string }) {
+export function ConfirmOrderButton({ planId, siblings, commercial, className = 'small primary' }: { planId: number; siblings: { loadPlanId: number; label: string }[]; commercial?: ConfirmCommercial; className?: string }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [confirmedAt, setConfirmedAt] = useState('')
@@ -50,6 +53,7 @@ export function ConfirmOrderButton({ planId, siblings, className = 'small primar
   }
 
   const n = siblings.length
+  const warnings = commercial ? confirmWarnings(commercial, n > 0 && all) : []
   return (
     <>
       <button className={className} onClick={start} title="O cliente confirmou o pedido: a carga passa para Exportações em curso (seguimento)">
@@ -74,6 +78,33 @@ export function ConfirmOrderButton({ planId, siblings, className = 'small primar
                 <input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} disabled={busy} />
                 {!paidAt && <small className="muted">Pagamento não informado</small>}
               </label>
+              {commercial && (
+                <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', fontSize: 13 }}>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                    Dados do pedido (só leitura — editam-se em “Proforma, transporte e fiscal”)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 10px' }}>
+                    {commercial.showPaymentTerms && (
+                      <>
+                        <span className="muted">Pagamento</span>
+                        <span>{commercial.paymentTerms ?? '—'}</span>
+                      </>
+                    )}
+                    <span className="muted">CFOP</span>
+                    <span>{commercial.cfop ?? '—'}</span>
+                    <span className="muted">Transportadora</span>
+                    <span>{commercial.transportCompany ? transportCompanyLabel(commercial.transportCompany) : '—'}</span>
+                  </div>
+                  {warnings.length > 0 && (
+                    <div className="alert warn" style={{ margin: '8px 0 0', fontSize: 12 }}>
+                      {warnings.map((x) => (
+                        <div key={x}>⚠ {x}</div>
+                      ))}
+                      <div style={{ marginTop: 2 }}>Pode confirmar mesmo assim e completar depois.</div>
+                    </div>
+                  )}
+                </div>
+              )}
               {n > 0 && (
                 <div>
                   <label className="check">

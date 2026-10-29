@@ -1,8 +1,24 @@
 import { expeditionModel } from '@/domain/expedition'
 import { quadrantShares } from '@/domain/quadrants'
 import type { LoadDoc } from '@/domain/types'
+import { SPECIAL_TRANSPORT_LABEL, specialTransportCompany, transportCompanyLabel } from '@/domain/transportCompany'
 import { PDF_LOGO_PATH } from '@/lib/pdf/i18n'
 import type { CaptureFn, CaptureView } from '../three/Scene3D'
+
+/**
+ * Transportadora como aparece na EXPEDIÇÃO (tela e PDF): "Empresa · cód. 12"; as entradas especiais do ERP
+ * viram o que significam para o depósito (DESTINATARIO → "Retirada pelo cliente (destinatário)", A DEFINIR,
+ * PROPRIO, Correios — com o serviço postal entre parênteses: "Correios (SEDEX)"). Sem transportadora: null.
+ * Pura (serve à página do servidor e ao editor).
+ */
+export function expeditionTransportLabel(c: { code: string; name: string } | null | undefined): string | null {
+  if (!c) return null
+  const kind = specialTransportCompany(c)
+  if (!kind) return transportCompanyLabel(c)
+  const label = SPECIAL_TRANSPORT_LABEL[kind]
+  const name = c.name.replace(/\s+/g, ' ').trim()
+  return kind === 'postal' && !/^correios?$/i.test(name) ? `${label} (${name})` : label
+}
 
 /** dados da carga no cabeçalho do PDF de expedição */
 export interface ExpeditionInfo {
@@ -13,6 +29,7 @@ export interface ExpeditionInfo {
   orderRef?: string | null
   destination?: string | null
   mode: string | null
+  /** já rotulada (expeditionTransportLabel); null = a definir */
   transportCompany: string | null
   /** nome do usuário que gera o PDF (rodapé discreto) */
   generatedBy?: string | null

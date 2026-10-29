@@ -262,9 +262,11 @@ function OrderPanel({ d, confirmedBy }: { d: ExportDetail; confirmedBy: string |
         </Info>
         <Info k="Proforma">{d.orderRef ?? '—'}</Info>
         <Info k="Incoterm">{d.incoterm || '—'}</Info>
+        <Info k="CFOP">{d.cfop ?? <span className="muted">não informado</span>}</Info>
+        <Info k="Condição de pagamento">{d.paymentTerms ?? <span className="muted">não informada</span>}</Info>
         <Info k="Transporte / serviço">{TYPE_INFO[d.service].label}</Info>
         <Info k="Equipamento">{d.equipment ? (d.equipment.name && d.equipment.name !== d.equipment.code ? `${d.equipment.code} — ${d.equipment.name}` : d.equipment.code) : '—'}</Info>
-        <Info k="Transportadora">{d.transportCompany ?? '—'}</Info>
+        <Info k="Transportadora (ERP)">{d.transportCompany ?? <span className="muted">a definir</span>}</Info>
         <Info k="Agente">{d.agentName ?? '—'}</Info>
         <Info k="Carga criada por">{d.loadCreatedByName ?? '—'}</Info>
         <Info k="Confirmado em">

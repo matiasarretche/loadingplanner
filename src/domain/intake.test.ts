@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { customerInText, equipmentCodeInText, modeInText, IntakeDraft, matchCustomer, missingForCreate, normName, unitsFor, serviceInText } from './intake'
+import { commercialProblems, customerInText, equipmentCodeInText, modeInText, IntakeDraft, matchCustomer, missingForCreate, normName, unitsFor, serviceInText } from './intake'
 
 const base: IntakeDraft = {
   area: 'EXPORT',
@@ -118,5 +118,23 @@ describe('serviceInText: caminhão consolidado', () => {
     // texto marítimo que cita o caminhão da coleta continua LCL
     expect(serviceInText('LCL consolidado, retiro en camión en la fábrica')).toBe('LCL')
     expect(serviceInText('carga consolidada marítima, flete terrestre incluido')).toBe('LCL')
+  })
+})
+
+describe('dados comerciais do pedido (opcionais)', () => {
+  it('vazios não bloqueiam nem entram no que falta', () => {
+    expect(commercialProblems(base)).toEqual([])
+    expect(missingForCreate({ ...base, transportCompanyId: null, paymentTerms: null, cfop: '' })).toEqual([])
+  })
+  it('CFOP fora do formato bloqueia; fora da área, não', () => {
+    expect(commercialProblems({ ...base, cfop: '71011' })).toEqual(['CFOP inválido: use 4 dígitos, ex.: 7.101'])
+    expect(commercialProblems({ ...base, cfop: '7101' })).toEqual([])
+    expect(commercialProblems({ ...base, cfop: '5.102' })).toEqual([])
+  })
+  it('condição de pagamento incompleta bloqueia só na Exportação (no Mercado Interno não é gravada)', () => {
+    const t = { advancePct: 30, balanceWhen: null }
+    expect(commercialProblems({ ...base, paymentTerms: t })).toEqual(['Condição de pagamento: Informe quando se paga o saldo.'])
+    expect(commercialProblems({ ...base, area: 'DOMESTIC', paymentTerms: t })).toEqual([])
+    expect(commercialProblems({ ...base, paymentTerms: { advancePct: 30, balanceWhen: 'AGAINST_DOCS' } })).toEqual([])
   })
 })

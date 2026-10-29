@@ -58,6 +58,16 @@ export async function saveResourceAction(key: string, id: number | null, _: Reso
           .limit(1)
         if (other) return { error: 'Corrija os campos destacados.', fieldErrors: { code: `O código ${data.code} já é do cliente “${other.name}”.` }, values }
       }
+      // transportadora: o código do ERP é único — diz de qual (o nome se repete nas filiais)
+      if (key === 'transportadoras' && typeof data.code === 'string') {
+        const t = schema.transportCompanies
+        const [other] = await db
+          .select({ name: t.name })
+          .from(t)
+          .where(id == null ? eq(t.code, data.code) : and(eq(t.code, data.code), ne(t.id, id)))
+          .limit(1)
+        if (other) return { error: 'Corrija os campos destacados.', fieldErrors: { code: `O código ${data.code} já é da transportadora “${other.name}”.` }, values }
+      }
       return { error: 'Já existe um registro com este código/nome.', values }
     }
     throw e

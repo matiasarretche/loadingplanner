@@ -29,9 +29,13 @@ export interface DashRow {
   customer: string
   country: string
   orderRef: string | null
-  /** transportadora da carga ("CÓDIGO — Nome") */
+  /** transportadora da carga ("Nome · cód. 12", transportCompanyLabel) */
   transportCompany: string | null
   incoterm: string
+  /** CFOP do pedido ("7.101"); null = não informado ou usuário sem acesso a preços (Expedição) */
+  cfop: string | null
+  /** condição de pagamento em português (paymentTermsText); null = não informada ou usuário sem acesso a preços */
+  paymentTerms: string | null
   /** tipo de envio */
   mode: ShipmentService
   equipment: string
@@ -147,7 +151,23 @@ const COLS: Col[] = [
   { key: 'customer', label: 'Cliente', default: true, sort: (r) => r.customer.toLowerCase(), cell: (r) => r.customer, csv: (r) => r.customer },
   { key: 'country', label: 'País', default: true, sort: (r) => r.country.toLowerCase(), cell: (r) => <Flag country={r.country} />, csv: (r) => r.country },
   { key: 'orderRef', label: 'Proforma / pedido', default: true, sort: (r) => r.orderRef ?? '', cell: (r) => r.orderRef ?? '—', csv: (r) => r.orderRef ?? '' },
-  { key: 'transportCompany', label: 'Transportadora', default: false, sort: (r) => r.transportCompany ?? '', cell: (r) => r.transportCompany ?? '—', csv: (r) => r.transportCompany ?? '' },
+  { key: 'transportCompany', label: 'Transportadora', default: false, sort: (r) => (r.transportCompany ?? '').toLowerCase(), cell: (r) => r.transportCompany ?? '—', csv: (r) => r.transportCompany ?? '' },
+  { key: 'cfop', label: 'CFOP', default: false, sort: (r) => r.cfop ?? '', cell: (r) => r.cfop ?? '—', csv: (r) => r.cfop ?? '' },
+  {
+    key: 'paymentTerms',
+    label: 'Condição de pagamento',
+    default: false,
+    sort: (r) => (r.paymentTerms ?? '').toLowerCase(),
+    cell: (r) =>
+      r.paymentTerms ? (
+        <span title={r.paymentTerms} style={{ display: 'inline-block', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>
+          {r.paymentTerms}
+        </span>
+      ) : (
+        '—'
+      ),
+    csv: (r) => r.paymentTerms ?? '',
+  },
   {
     key: 'alerts',
     label: 'Alertas',
@@ -199,6 +219,9 @@ const COLS: Col[] = [
   },
 ]
 
+/** colunas comerciais/fiscais: só para quem vê preços (os dados nem chegam para a Expedição) */
+const COMMERCIAL_COLS = new Set(['cfop', 'paymentTerms'])
+
 const LS_COLS = 'lp:dash:cols:v2' // v2: colunas Área / Criado por
 const LS_VIEW = 'lp:dash:view'
 const LS_PER = 'lp:dash:per'
@@ -240,7 +263,7 @@ const quickTest = (q: Quick, r: DashRow, meId: number): boolean =>
 function applyFilters(rows: DashRow[], f: Filters, meId: number) {
   const q = f.q.trim().toLowerCase()
   return rows.filter((r) => {
-    if (q && !`${r.name} ${r.customer} ${r.country} ${r.orderRef ?? ''} ${r.transportCompany ?? ''} ${r.equipment} ${r.createdBy}`.toLowerCase().includes(q)) return false
+    if (q && !`${r.name} ${r.customer} ${r.country} ${r.orderRef ?? ''} ${r.transportCompany ?? ''} ${r.cfop ?? ''} ${r.paymentTerms ?? ''} ${r.equipment} ${r.createdBy}`.toLowerCase().includes(q)) return false
     if (f.country && r.country !== f.country) return false
     if (f.incoterm && r.incoterm !== f.incoterm) return false
     if (f.mode && r.mode !== f.mode) return false
@@ -262,12 +285,15 @@ export function DashboardClient({
   me,
   canEdit,
   canApprove,
+  canViewPrices,
   permissionError,
 }: {
   rows: DashRow[]
   me: { id: number; areas: Area[] }
   canEdit: boolean
   canApprove: boolean
+  /** colunas CFOP e Condição de pagamento (dados comerciais/fiscais) */
+  canViewPrices: boolean
   permissionError: boolean
 }) {
   const router = useRouter()
@@ -327,7 +353,8 @@ export function DashboardClient({
 
   const countries = useMemo(() => [...new Set(rows.map((r) => r.country))].sort((a, b) => a.localeCompare(b, 'pt-BR')), [rows])
   const incoterms = useMemo(() => [...new Set(rows.map((r) => r.incoterm))].sort(), [rows])
-  const visible = COLS.filter((c) => cols.includes(c.key) && (c.key !== 'area' || me.areas.length > 1))
+  const allowed = (c: Col) => canViewPrices || !COMMERCIAL_COLS.has(c.key)
+  const visible = COLS.filter((c) => cols.includes(c.key) && (c.key !== 'area' || me.areas.length > 1) && allowed(c))
   const active = Object.values(f).some(Boolean)
   const set = (k: keyof Filters, v: string) => {
     setF((x) => ({ ...x, [k]: v }))
@@ -547,7 +574,7 @@ export function DashboardClient({
                 </button>
                 {colsOpen && (
                   <div className="dash-pop" style={{ right: 0, width: 220 }}>
-                    {COLS.map((c) => (
+                    {COLS.filter(allowed).map((c) => (
                       <label key={c.key} className="check">
                         <input
                           type="checkbox"

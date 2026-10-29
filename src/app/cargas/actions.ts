@@ -26,7 +26,11 @@ import { Area, AREAS, AreaUser, canAccessArea } from '@/lib/areas'
 import { computeLoadPricing, refreezeCommission } from '@/lib/loadPricing'
 import { autoPlanName, normalizeOrderRef, orderRefLabel } from '@/lib/orderRef'
 import { placeValue } from '@/lib/places'
-import { parseMoney, PaymentTerms, paymentTermsErrors } from '@/domain/paymentTerms'
+import { checkPaymentTerms, parseMoney, PaymentTerms, paymentTermsText } from '@/domain/paymentTerms'
+import { cfopError, normalizeCfop } from '@/domain/cfop'
+import { CFOP_CONFLICT_ERROR, cfopConflict, inactiveCarrierToSiblingsError, siblingCommercialChanges, termsKey } from './[id]/confirmCommercial'
+import { transportCompanyLabel } from '@/domain/transportCompany'
+import { resolveTransportCompany } from '@/lib/transportCompanies'
 import { VEHICLE_LENGTH_LIMITS, withVehicleLength } from '@/domain/vehicleLength'
 import { planUndoApproval, UndoApprovalBlock } from '@/domain/approval'
 import { commissionAgentId } from '@/domain/pricing'
@@ -97,19 +101,26 @@ export async function createPlanAction(_: NewPlanState, fd: FormData): Promise<N
   if (Number.isNaN(lengthMm)) return { error: `Comprimento "${get('lengthMm')}" inválido: use o formato brasileiro (ex.: 15.300 ou 15,3 m).`, values }
   if (lengthMm != null && space.kind === 'VEHICLE' && (lengthMm < VEHICLE_LENGTH_LIMITS.min || lengthMm > VEHICLE_LENGTH_LIMITS.max || !Number.isInteger(lengthMm)))
     return { error: `Comprimento do caminhão entre ${VEHICLE_LENGTH_LIMITS.min} e ${VEHICLE_LENGTH_LIMITS.max} mm.`, values }
-  // transportadora (opcional): "CÓDIGO — Nome", o código ou o nome
-  let transportCompanyId: number | null = null
-  // "seguir sem cadastrar": a transportadora informada fica só nas observações do pedido
-  let unregisteredCompany: string | null = null
-  const tcq = get('transportCompany')
-  if (tcq) {
-    const all = await db.select().from(schema.transportCompanies)
-    const code = tcq.split(' — ')[0].trim().toLowerCase()
-    const hit = all.find((c) => c.code.toLowerCase() === code) ?? all.find((c) => c.name.toLowerCase() === tcq.toLowerCase())
-    if (hit) transportCompanyId = hit.id
-    else if (get('transportSkip') === '1') unregisteredCompany = tcq.slice(0, 120)
-    else return { error: `Transportadora "${tcq}" não cadastrada: cadastre-a ou escolha "Seguir sem cadastrar".`, values }
+  // transportadora (opcional): o id escolhido no seletor (ativa). Nunca pelo NOME: filiais repetem o nome
+  // (formulário antigo, de antes do seletor: texto "CÓDIGO — Nome" — só o código exato vale)
+  const tc = await resolveTransportCompany(get('transportCompanyId'), { legacyText: get('transportCompany') })
+  if ('error' in tc) return { error: tc.error, values }
+  const transportCompanyId = tc.id
+  // condição de pagamento (só Exportação; opcional; vem em JSON do formulário) e CFOP do pedido (opcional; N.NNN)
+  let termsRaw: unknown = null
+  if (area === 'EXPORT' && get('paymentTerms')) {
+    try {
+      termsRaw = JSON.parse(get('paymentTerms'))
+    } catch {
+      return { error: 'Condição de pagamento inválida: confira os campos.', values }
+    }
   }
+  const pt = checkPaymentTerms(termsRaw)
+  if (!pt.ok) return { error: pt.error, values }
+  const paymentTerms = pt.terms
+  const cfop = normalizeCfop(get('cfop'))
+  const cfopErr = cfopError(cfop)
+  if (cfopErr) return { error: cfopErr, values }
   if (!customerId && !newCustomer) return { error: 'Selecione ou informe o cliente.', values }
   // agente da carga: o escolhido no formulário (vazio = sem agente); sem o campo, o do cadastro do cliente
   let agentId: number | null = null
@@ -137,11 +148,11 @@ export async function createPlanAction(_: NewPlanState, fd: FormData): Promise<N
     }
     const [sh] = await tx
       .insert(schema.shipments)
-      .values({ customerId, orderRef: normalizeOrderRef(get('orderRef')), destinationCountry: country, incoterm, mode, service, area, originPlace, destinationPlace, customerAddress, notes: [get('notes'), unregisteredCompany ? `Transportadora (não cadastrada): ${unregisteredCompany}` : ''].filter(Boolean).join('\n') || null, createdBy: me.id, updatedBy: me.id })
+      .values({ customerId, orderRef: normalizeOrderRef(get('orderRef')), destinationCountry: country, incoterm, cfop, mode, service, area, originPlace, destinationPlace, customerAddress, notes: get('notes') || null, createdBy: me.id, updatedBy: me.id })
       .returning({ id: schema.shipments.id })
     const [lp] = await tx
       .insert(schema.loadPlans)
-      .values({ shipmentId: sh.id, name: name || autoPlanName(normalizeOrderRef(get('orderRef')), space.code, country, area), transportCompanyId, agentId, createdBy: me.id, updatedBy: me.id })
+      .values({ shipmentId: sh.id, name: name || autoPlanName(normalizeOrderRef(get('orderRef')), space.code, country, area), transportCompanyId, agentId, paymentTerms, createdBy: me.id, updatedBy: me.id })
       .returning({ id: schema.loadPlans.id })
     await tx.insert(schema.loadPlanVersions).values({
       loadPlanId: lp.id,
@@ -159,7 +170,7 @@ export async function createPlanAction(_: NewPlanState, fd: FormData): Promise<N
     })
     return lp.id
   })
-  await logAudit('load_plan', planId, 'create', me.id, { space: space.code, service })
+  await logAudit('load_plan', planId, 'create', me.id, { space: space.code, service, transportCompanyId, paymentTerms, cfop })
   revalidatePath('/')
   // atalho "Criar com IA": o editor abre e o assistente executa o texto guardado no navegador;
   // sem equipamento: abre direto o planejador de paletes mistos / volumes
@@ -251,7 +262,8 @@ export async function saveMultiUnitAction(
         const ev = evaluate(doc)
         const [lp] = await tx
           .insert(schema.loadPlans)
-          .values({ shipmentId: plan.shipmentId, name: `${plan.name} · ${unitNoun(doc.space)} ${n}`, agentId: plan.agentId, transportCompanyId: plan.transportCompanyId, createdBy: me.id, updatedBy: me.id })
+          // agente, transportadora e condição de pagamento valem para o pedido inteiro; frete e seguro são por unidade
+          .values({ shipmentId: plan.shipmentId, name: `${plan.name} · ${unitNoun(doc.space)} ${n}`, agentId: plan.agentId, transportCompanyId: plan.transportCompanyId, paymentTerms: plan.paymentTerms, createdBy: me.id, updatedBy: me.id })
           .returning({ id: schema.loadPlans.id })
         await tx.insert(schema.loadPlanVersions).values({
           loadPlanId: lp.id,
@@ -636,61 +648,160 @@ export async function updateOrderRefAction(planId: number, value: string): Promi
   }
 }
 
+/** texto do histórico: "CFOP: 7.101" / "Transportadora alterada para X (era Y)" / "Condição de pagamento apagada (era …)" */
+function changeMessage(label: string, feminine: boolean, before: string | null, after: string | null): string {
+  if (!after) return `${label} ${feminine ? 'apagada' : 'apagado'} (era ${before})`
+  if (!before) return `${label}: ${after}`
+  return `${label} ${feminine ? 'alterada' : 'alterado'} para ${after} (era ${before})`
+}
+
 /**
- * Proforma e transporte de uma carga: transportadora (por código ou nome), frete e seguro em USD e
- * condições de pagamento. Não muda a composição (vale para qualquer versão). Fica na auditoria.
+ * Proforma, transporte e fiscal de uma carga: transportadora (id do seletor), frete e seguro em USD (por
+ * unidade), condição de pagamento (só Exportação; no Mercado Interno a gravada não muda) e CFOP — este é do
+ * PEDIDO (shipment): vale para todas as unidades.
+ * - Condição de pagamento (Exportação): vale SEMPRE para todas as unidades do pedido. `paymentTerms`
+ *   ausente = fica a gravada nesta carga (o painel só a envia se foi editada), que também é levada às outras.
+ * - Transportadora: por carga; `applyCarrierToOrder` a grava também nas outras unidades do MESMO pedido
+ *   (só se estiver ativa: uma inativa só continua na unidade que já a tinha).
+ * - CFOP: só enviado se editado no painel, com `cfopExpected` (o valor que o painel carregou); se o gravado
+ *   mudou desde então, recusa.
+ * Frete e seguro continuam por unidade; tudo numa transação. Não muda a composição (vale para qualquer
+ * versão). Fica na auditoria e, se a carga já tem seguimento de exportação (pedido confirmado), no histórico
+ * do seguimento (evento "campo alterado").
  */
 export async function updateCommercialAction(
   planId: number,
-  input: { agentId?: number | null; transportCompany: string; freightUsd: string; insuranceUsd: string; paymentTerms: PaymentTerms | null },
+  input: {
+    agentId?: number | null
+    transportCompanyId: number | null
+    freightUsd: string
+    insuranceUsd: string
+    paymentTerms?: PaymentTerms | null
+    cfop?: string | null
+    cfopExpected?: string | null
+    applyCarrierToOrder?: boolean
+  },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const me = await assertUser('editPlans')
     if (!(await canAccessPlan(me, planId))) return { ok: false, error: 'Carga não encontrada.' }
     const plan = await db.query.loadPlans.findFirst({ where: eq(schema.loadPlans.id, planId) })
     if (!plan) return { ok: false, error: 'Carga não encontrada.' }
+    const shipment = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, plan.shipmentId) })
+    if (!shipment) return { ok: false, error: 'Pedido não encontrado.' }
     const usd = (v: string, label: string) => {
       const n = parseMoney(v)
       if (n == null) return null
       if (!Number.isFinite(n) || n < 0 || n > 10_000_000) throw new Error(`${label}: valor inválido.`)
       return Math.round(n * 100) / 100
     }
-    const freightUsd = usd(input.freightUsd, 'Frete')
-    const insuranceUsd = usd(input.insuranceUsd, 'Seguro')
-    let terms: PaymentTerms | null = null
-    if (input.paymentTerms) {
-      const t = input.paymentTerms
-      terms = { advancePct: Number(t.advancePct), balanceWhen: Number(t.advancePct) >= 100 ? null : t.balanceWhen ?? null, days: t.days != null && String(t.days) !== '' ? Number(t.days) : null, note: t.note?.trim() || null }
-      const errs = paymentTermsErrors(terms)
-      if (errs.length) return { ok: false, error: errs.join(' ') }
+    const freightUsd = usd(input.freightUsd ?? '', 'Frete')
+    const insuranceUsd = usd(input.insuranceUsd ?? '', 'Seguro')
+    const exportArea = shipment.area === 'EXPORT'
+    // condição de pagamento: só na Exportação (no Mercado Interno a gravada fica como está). Sem o campo (não
+    // editada no painel) fica a gravada nesta carga — que, valendo para o pedido todo, também vai às outras unidades
+    let terms = plan.paymentTerms
+    if (exportArea && input.paymentTerms !== undefined) {
+      const pt = checkPaymentTerms(input.paymentTerms)
+      if (!pt.ok) return { ok: false, error: pt.error }
+      terms = pt.terms
     }
-    // transportadora: "CÓDIGO — Nome", só o código ou o nome (sem diferenciar maiúsculas)
-    let transportCompanyId: number | null = null
-    const q = input.transportCompany.trim()
-    if (q) {
-      const all = await db.select().from(schema.transportCompanies)
-      const code = q.split(' — ')[0].trim().toLowerCase()
-      const hit = all.find((c) => c.code.toLowerCase() === code) ?? all.find((c) => c.name.toLowerCase() === q.toLowerCase())
-      if (!hit) return { ok: false, error: `Transportadora "${q}" não encontrada (cadastre em Cadastros → Transportadoras).` }
-      transportCompanyId = hit.id
+    // transportadora: pelo id; escolha nova só ativa (a já vinculada pode ficar mesmo inativa)
+    const tc = await resolveTransportCompany(input.transportCompanyId, { keepId: plan.transportCompanyId })
+    if ('error' in tc) return { ok: false, error: tc.error }
+    const transportCompanyId = tc.id
+    // CFOP do pedido (opcional; sem o campo, fica o gravado). Vem com o valor que o painel carregou: se outra
+    // pessoa o mudou nesse meio-tempo (por outra unidade do pedido), recusa em vez de reverter a mudança dela
+    let cfop = shipment.cfop
+    if (input.cfop !== undefined) {
+      cfop = normalizeCfop(input.cfop)
+      const err = cfopError(cfop)
+      if (err) return { ok: false, error: err }
+      if (cfopConflict(shipment.cfop, input.cfopExpected, cfop)) return { ok: false, error: CFOP_CONFLICT_ERROR }
     }
+    const cfopChanged = (cfop ?? null) !== (shipment.cfop ?? null)
     // agente da carga (comissão): só um agente cadastrado; null = sem agente
     let agentId = plan.agentId
     if (input.agentId !== undefined) {
       agentId = input.agentId == null ? null : Number(input.agentId)
       if (agentId != null && !(await db.query.agents.findFirst({ where: eq(schema.agents.id, agentId) }))) return { ok: false, error: 'Agente não encontrado.' }
     }
-    await db.update(schema.loadPlans).set({ agentId, transportCompanyId, freightUsd, insuranceUsd, paymentTerms: terms, updatedBy: me.id, updatedAt: new Date() }).where(eq(schema.loadPlans.id, planId))
-    await logAudit('load_plan', planId, 'commercial', me.id, {
-      from: { agentId: plan.agentId, transportCompanyId: plan.transportCompanyId, freightUsd: plan.freightUsd, insuranceUsd: plan.insuranceUsd, paymentTerms: plan.paymentTerms },
-      to: { agentId, transportCompanyId, freightUsd, insuranceUsd, paymentTerms: terms },
+
+    // outras unidades do mesmo pedido: a condição (Exportação) vai SEMPRE; a transportadora só com
+    // applyCarrierToOrder; o CFOP é do pedido (uma gravação só, no shipment)
+    const siblingRows = await db
+      .select({ id: schema.loadPlans.id, transportCompanyId: schema.loadPlans.transportCompanyId, paymentTerms: schema.loadPlans.paymentTerms })
+      .from(schema.loadPlans)
+      .where(and(eq(schema.loadPlans.shipmentId, plan.shipmentId), ne(schema.loadPlans.id, planId)))
+    const siblings = (await Promise.all(siblingRows.map(async (s) => ((await canAccessPlan(me, s.id)) ? [s] : [])))).flat()
+    const changes = siblingCommercialChanges({ transportCompanyId, paymentTerms: terms }, siblings, { exportArea, applyCarrier: Boolean(input.applyCarrierToOrder) })
+    // levar a transportadora a outra unidade é escolha nova para ela: só ativa (o keepId vale só para esta carga)
+    if (transportCompanyId != null && changes.some((c) => c.carrier)) {
+      const row = await db.query.transportCompanies.findFirst({ where: eq(schema.transportCompanies.id, transportCompanyId) })
+      const err = inactiveCarrierToSiblingsError(changes, row ? { active: row.active, label: transportCompanyLabel(row) } : null)
+      if (err) return { ok: false, error: err }
+    }
+
+    // histórico do seguimento (pedido confirmado): um evento por campo alterado em cada unidade com operação
+    const ops = await db
+      .select({ id: schema.exportOperations.id, loadPlanId: schema.exportOperations.loadPlanId })
+      .from(schema.exportOperations)
+      .where(inArray(schema.exportOperations.loadPlanId, [planId, ...siblings.map((s) => s.id)]))
+    const tcIds = [...new Set([plan.transportCompanyId, transportCompanyId, ...changes.filter((c) => c.carrier).map((c) => c.sibling.transportCompanyId)].filter((x): x is number => x != null))]
+    const tcRows = tcIds.length
+      ? await db.select({ id: schema.transportCompanies.id, code: schema.transportCompanies.code, name: schema.transportCompanies.name }).from(schema.transportCompanies).where(inArray(schema.transportCompanies.id, tcIds))
+      : []
+    const tcText = (id: number | null) => {
+      const c = id != null ? tcRows.find((r) => r.id === id) : undefined
+      return c ? transportCompanyLabel(c) : id != null ? `#${id}` : null
+    }
+    const now = new Date()
+    const events: (typeof schema.exportEvents.$inferInsert)[] = []
+    const field = (operationId: number, f: 'paymentTerms' | 'cfop' | 'transportCompanyId', label: string, feminine: boolean, before: string | null, after: string | null) => {
+      if (before === after) return
+      events.push({ operationId, at: now, userId: me.id, source: 'MANUAL', kind: 'field', field: f, oldValue: before, newValue: after, message: changeMessage(label, feminine, before, after) })
+    }
+    for (const op of ops) {
+      // esta carga: tudo o que mudou; outra unidade: só o que foi levado a ela (transportadora e/ou condição)
+      const c = op.loadPlanId === planId ? { sibling: plan, carrier: true, terms: exportArea } : changes.find((x) => x.sibling.id === op.loadPlanId)
+      if (c?.carrier) field(op.id, 'transportCompanyId', 'Transportadora', true, tcText(c.sibling.transportCompanyId), tcText(transportCompanyId))
+      if (c?.terms && termsKey(c.sibling.paymentTerms) !== termsKey(terms)) field(op.id, 'paymentTerms', 'Condição de pagamento', true, paymentTermsText(c.sibling.paymentTerms, 'pt'), paymentTermsText(terms, 'pt'))
+      if (cfopChanged) field(op.id, 'cfop', 'CFOP', false, shipment.cfop, cfop)
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.update(schema.loadPlans).set({ agentId, transportCompanyId, freightUsd, insuranceUsd, paymentTerms: terms, updatedBy: me.id, updatedAt: now }).where(eq(schema.loadPlans.id, planId))
+      for (const c of changes)
+        await tx
+          .update(schema.loadPlans)
+          .set({ ...(c.carrier ? { transportCompanyId } : {}), ...(c.terms ? { paymentTerms: terms } : {}), updatedBy: me.id, updatedAt: now })
+          .where(eq(schema.loadPlans.id, c.sibling.id))
+      if (cfopChanged) await tx.update(schema.shipments).set({ cfop, updatedBy: me.id, updatedAt: now }).where(eq(schema.shipments.id, shipment.id))
+      if (events.length) await tx.insert(schema.exportEvents).values(events)
     })
+    await logAudit('load_plan', planId, 'commercial', me.id, {
+      from: { agentId: plan.agentId, transportCompanyId: plan.transportCompanyId, freightUsd: plan.freightUsd, insuranceUsd: plan.insuranceUsd, paymentTerms: plan.paymentTerms, cfop: shipment.cfop },
+      to: { agentId, transportCompanyId, freightUsd, insuranceUsd, paymentTerms: terms, cfop },
+      ...(changes.length || input.applyCarrierToOrder ? { applyCarrierToOrder: Boolean(input.applyCarrierToOrder), siblings: changes.map((c) => c.sibling.id) } : {}),
+    })
+    for (const c of changes)
+      await logAudit('load_plan', c.sibling.id, 'commercial', me.id, {
+        via: planId,
+        from: { transportCompanyId: c.sibling.transportCompanyId, paymentTerms: c.sibling.paymentTerms },
+        to: { transportCompanyId: c.carrier ? transportCompanyId : c.sibling.transportCompanyId, paymentTerms: c.terms ? terms : c.sibling.paymentTerms },
+      })
+    if (cfopChanged) await logAudit('shipment', shipment.id, 'cfop', me.id, { from: shipment.cfop, to: cfop, via: planId })
     // agente trocado: a versão aprovada é re-congelada com a comissão do novo agente
     if (agentId !== plan.agentId) {
       const n = await refreezeCommission([planId])
       if (n) await logAudit('load_plan', planId, 'recommission', me.id, { from: plan.agentId, to: agentId })
     }
     revalidatePath(`/cargas/${planId}`)
+    if (changes.length || cfopChanged) for (const s of siblings) revalidatePath(`/cargas/${s.id}`)
+    if (events.length) {
+      revalidatePath('/exportacoes')
+      for (const opId of new Set(events.map((e) => e.operationId))) revalidatePath(`/exportacoes/${opId}`)
+    }
     revalidatePath('/')
     return { ok: true }
   } catch (e) {
@@ -728,24 +839,6 @@ export async function deletePhotoAction(planId: number, photoId: number): Promis
   } catch (e) {
     if (e instanceof AuthError) return { ok: false, error: e.message }
     throw e
-  }
-}
-
-/** Cadastro rápido de transportadora a partir da Nova carga (código único + nome). */
-export async function quickTransportCompanyAction(input: { code: string; name: string }): Promise<{ ok: true; label: string } | { ok: false; error: string }> {
-  try {
-    const me = await assertUser('editPlans')
-    const code = input.code.trim().slice(0, 40)
-    const name = input.name.trim().slice(0, 160)
-    if (!code || !name) return { ok: false, error: 'Informe o código e o nome da transportadora.' }
-    const all = await db.select().from(schema.transportCompanies)
-    if (all.some((c) => c.code.toLowerCase() === code.toLowerCase())) return { ok: false, error: `Já existe uma transportadora com o código "${code}".` }
-    const [row] = await db.insert(schema.transportCompanies).values({ code, name, createdBy: me.id, updatedBy: me.id }).returning({ id: schema.transportCompanies.id })
-    await logAudit('transport_company', row.id, 'create', me.id, { code, name, via: 'nova carga' })
-    return { ok: true, label: `${code} — ${name}` }
-  } catch (e) {
-    if (e instanceof AuthError) return { ok: false, error: e.message }
-    return { ok: false, error: 'Não foi possível cadastrar a transportadora.' }
   }
 }
 

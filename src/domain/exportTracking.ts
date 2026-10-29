@@ -507,8 +507,10 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 
 /**
  * Monta o resumo para o cliente a partir das linhas do banco — PURO e por lista de permissões: cada campo do
- * DTO é copiado explicitamente; o que não está aqui (observações, incidência, atraso, responsável, pagamento,
- * valores, origens, histórico) nunca chega ao PDF. null = a operação pedida não é de uma carga do pedido.
+ * DTO é copiado explicitamente; o que não está aqui (observações, incidência, atraso, responsável, pagamento e
+ * condição de pagamento, CFOP, transportadora/código do ERP, valores, origens, histórico) nunca chega ao PDF.
+ * O armador/transportadora do PDF é o do seguimento (op.carrier), nunca a transportadora da carga.
+ * null = a operação pedida não é de uma carga do pedido.
  * includeSiblings: todas as cargas do pedido com seguimento (inclusive canceladas), na ordem do pedido.
  */
 export function trackingSummaryDto(src: SummarySource): TrackingSummary | null {

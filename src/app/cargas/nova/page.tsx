@@ -11,6 +11,7 @@ import { isService } from '@/domain/shipmentType'
 import { currentPackCatalog } from '@/lib/catalog'
 import { OrderIntake } from '../ia/OrderIntake'
 import { formatCustomerAddress } from '@/domain/customerAddress'
+import { sortTransportCompanies } from '@/domain/transportCompany'
 
 export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas/nova'>) {
   const u = await requireUser('editPlans')
@@ -20,7 +21,8 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
     db.select().from(schema.containerTypes).where(eq(schema.containerTypes.active, true)).orderBy(asc(schema.containerTypes.code)),
     db.select().from(schema.vehicleTypes).where(cargoVehicleWhere()).orderBy(asc(schema.vehicleTypes.code)),
     db.select().from(schema.constraintProfiles).where(eq(schema.constraintProfiles.active, true)).orderBy(asc(schema.constraintProfiles.name)),
-    db.select().from(schema.transportCompanies).where(eq(schema.transportCompanies.active, true)).orderBy(asc(schema.transportCompanies.code)),
+    // transportadoras ativas do ERP (código + nome; filiais repetem o nome) para o seletor com busca
+    db.select({ id: schema.transportCompanies.id, code: schema.transportCompanies.code, name: schema.transportCompanies.name, active: schema.transportCompanies.active }).from(schema.transportCompanies).where(eq(schema.transportCompanies.active, true)),
     db.select({ id: schema.agents.id, name: schema.agents.name }).from(schema.agents).where(eq(schema.agents.active, true)).orderBy(asc(schema.agents.name)),
   ])
   // última carga de cada cliente (nas áreas do usuário): preenche o formulário ao escolher o cliente
@@ -43,6 +45,10 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
       profileIds: sql<number[] | null>`(select coalesce(jsonb_agg((l->>'profileId')::int), '[]'::jsonb) from jsonb_array_elements(coalesce(${schema.loadPlanVersions.document}->'limits', '[]'::jsonb)) l where l ? 'profileId')`,
       at: schema.loadPlanVersions.createdAt,
       plan: schema.loadPlans.name,
+      // transportadora e condição de pagamento da carga; CFOP do pedido
+      transportCompanyId: schema.loadPlans.transportCompanyId,
+      paymentTerms: schema.loadPlans.paymentTerms,
+      cfop: schema.shipments.cfop,
     })
     .from(schema.loadPlanVersions)
     .innerJoin(schema.loadPlans, eq(schema.loadPlans.id, schema.loadPlanVersions.loadPlanId))
@@ -52,7 +58,11 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
   const lastLoad: Record<string, LastLoad> = {}
   for (const r of recent) {
     const k = String(r.customerId)
-    if (lastLoad[k]) continue
+    if (lastLoad[k]) {
+      // a última transportadora usada pelo cliente pode estar numa carga anterior à última
+      if (lastLoad[k].lastTransportCompanyId == null && r.transportCompanyId != null) lastLoad[k].lastTransportCompanyId = r.transportCompanyId
+      continue
+    }
     lastLoad[k] = {
       area: r.area,
       country: r.country,
@@ -67,9 +77,15 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
       profiles: (r.profileIds ?? []).map(String),
       plan: r.plan,
       date: dateBR(r.at),
+      transportCompanyId: r.transportCompanyId,
+      lastTransportCompanyId: r.transportCompanyId,
+      paymentTerms: r.paymentTerms,
+      cfop: r.cfop,
     }
   }
   const fmtKg = (v: number | null) => (v == null ? '?' : v.toLocaleString('pt-BR'))
+  // transportadoras por nome e, entre filiais, pelo código
+  const pickerCompanies = sortTransportCompanies(companies)
   // clientes ativos para o seletor com busca (nome, cidade, país, código do ERP) e o endereço do cadastro em uma linha
   const pickerCustomers = customers.map((c) => ({ id: c.id, name: c.name, code: c.code, city: c.city, country: c.country ?? '', address: formatCustomerAddress(c) }))
   // entrada pelo PEDIDO DO CLIENTE (texto, anexos, ditado) interpretado pela IA
@@ -93,6 +109,8 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
         <OrderIntake
           areas={areas}
           customers={pickerCustomers}
+          companies={pickerCompanies}
+          lastLoad={lastLoad}
           equipment={[
             ...containers.map((c) => ({ value: `CONTAINER:${c.id}`, label: `${c.code} — ${c.name}`, mode: c.transportMode === 'AIR' ? 'AIR' : 'SEA' })),
             ...vehicles.map((v) => ({ value: `VEHICLE:${v.id}`, label: `${v.code} — ${v.name}`, mode: 'ROAD' })),
@@ -103,7 +121,7 @@ export default async function NovaCargaPage({ searchParams }: PageProps<'/cargas
       <NewPlanForm
         areas={areas}
         lastLoad={lastLoad}
-        companies={companies.map((c) => `${c.code} — ${c.name}`)}
+        companies={pickerCompanies}
         aiMode={sp.ia === '1'}
         initialService={isService(sp.tipo) ? sp.tipo : undefined}
         agents={agents.map((a) => ({ value: String(a.id), label: a.name }))}

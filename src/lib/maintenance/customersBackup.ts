@@ -52,8 +52,8 @@ export interface CustomersBackup {
 
 /**
  * BACKUP dos clientes atuais em JSON compactado (gzip), numa leitura consistente (REPEATABLE READ, só
- * leitura): as linhas COMPLETAS da tabela customer (código, endereço, ID fiscal, agente, ativo, observações,
- * datas e autores) + os agentes citados (id, nome, país, ativo) e os usuários (id, nome) dos autores.
+ * leitura): as linhas COMPLETAS da tabela customer (código, endereço, ID fiscal, contato — nome, e-mail e
+ * telefone —, agente, ativo, observações, datas e autores; colunas novas entram sozinhas: select() sem lista) + os agentes citados (id, nome, país, ativo) e os usuários (id, nome) dos autores.
  */
 export async function buildCustomersBackup(user: { id: number; email: string; name: string }, now = new Date()): Promise<CustomersBackup> {
   const data = await db.transaction(

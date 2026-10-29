@@ -4,6 +4,8 @@ import { db, schema } from '@/db'
 import type { ConfirmContext, ConfirmInput, ExportDetail, ExportEvent, ExportEventKind, ExportEventSource, ExportProduct, ExportRow, ExportSibling, TrackingPatch, TrackingValues } from '@/app/exportacoes/types'
 import { DATE_FIELDS, describeChange, etaFrom, ExportStatus, FIELD_LABEL, FieldSource, FieldSources, isActiveStatus, isExportStatus, isIsoDate, PER_UNIT_FIELDS, SummaryVersionInput, todayBR, TRACKING_FIELDS, TrackingField, TrackingSummary, trackingSummaryDto, TrackingValue } from '@/domain/exportTracking'
 import { kitBoxLines, kitFamilyOf } from '@/domain/kitBoxes'
+import { paymentTermsText, type PaymentTerms } from '@/domain/paymentTerms'
+import { transportCompanyLabel } from '@/domain/transportCompany'
 import { loadGeometries, loadSummary } from '@/domain/load'
 import { proformaTotals } from '@/domain/pricing'
 import { serviceOf } from '@/domain/shipmentType'
@@ -73,7 +75,6 @@ const PATCH_FIELDS: readonly PatchField[] = [...TRACKING_FIELDS, ...PLACE_FIELDS
 
 class PatchError extends Error {}
 
-const companyLabel = (c: { code: string; name: string }) => `${c.code} — ${c.name}`
 const asText = (v: TrackingValue | undefined) => (v == null || v === '' ? null : String(v))
 const sameValue = (a: TrackingValue | undefined, b: TrackingValue | undefined) => asText(a) === asText(b)
 
@@ -491,11 +492,13 @@ interface RowCtx {
   users: Map<number, { name: string; avatar: AvatarRef }>
   units: Map<number, number[]>
   companies: Map<number, string>
+  /** condição de pagamento (dado comercial): só para quem vê preços */
+  viewPrices: boolean
 }
 
 function toRow(
   op: OpRow,
-  plan: { id: number; name: string; shipmentId: number; createdBy: number | null; transportCompanyId: number | null },
+  plan: { id: number; name: string; shipmentId: number; createdBy: number | null; transportCompanyId: number | null; paymentTerms: PaymentTerms | null },
   shipment: typeof schema.shipments.$inferSelect,
   customer: string,
   equipment: string | null,
@@ -518,6 +521,8 @@ function toRow(
     mode: shipment.mode,
     equipment,
     transportCompany: plan.transportCompanyId != null ? ctx.companies.get(plan.transportCompanyId) ?? null : null,
+    cfop: shipment.cfop ?? null,
+    paymentTerms: ctx.viewPrices ? paymentTermsText(plan.paymentTerms, 'pt') : null,
     status: op.status,
     delayed: op.delayed,
     incident: op.incident,
@@ -567,7 +572,7 @@ async function unitsOf(shipIds: number[]) {
 async function companyMap(ids: number[]) {
   if (!ids.length) return new Map<number, string>()
   const rows = await db.select({ id: schema.transportCompanies.id, code: schema.transportCompanies.code, name: schema.transportCompanies.name }).from(schema.transportCompanies).where(inArray(schema.transportCompanies.id, ids))
-  return new Map(rows.map((c) => [c.id, companyLabel(c)]))
+  return new Map(rows.map((c) => [c.id, transportCompanyLabel(c)]))
 }
 
 /**
@@ -580,7 +585,14 @@ export async function trackingRows(u: AreaUser, scope: 'active' | 'history'): Pr
   const rows = await db
     .select({
       op: schema.exportOperations,
-      plan: { id: schema.loadPlans.id, name: schema.loadPlans.name, shipmentId: schema.loadPlans.shipmentId, createdBy: schema.loadPlans.createdBy, transportCompanyId: schema.loadPlans.transportCompanyId },
+      plan: {
+        id: schema.loadPlans.id,
+        name: schema.loadPlans.name,
+        shipmentId: schema.loadPlans.shipmentId,
+        createdBy: schema.loadPlans.createdBy,
+        transportCompanyId: schema.loadPlans.transportCompanyId,
+        paymentTerms: schema.loadPlans.paymentTerms,
+      },
       shipment: schema.shipments,
       customer: schema.customers.name,
     })
@@ -604,7 +616,7 @@ export async function trackingRows(u: AreaUser, scope: 'active' | 'history'): Pr
     unitsOf([...new Set(rows.map((r) => r.plan.shipmentId))]),
     companyMap([...new Set(rows.map((r) => r.plan.transportCompanyId).filter((x): x is number => x != null))]),
   ])
-  const ctx: RowCtx = { users, units, companies }
+  const ctx: RowCtx = { users, units, companies, viewPrices: can.viewPrices(u.role) }
   const out = rows.map((r) => toRow(r.op, r.plan, r.shipment, r.customer, equipment.get(r.plan.id) ?? null, ctx))
   return scope === 'active' ? out.sort((a, b) => b.confirmedAt.localeCompare(a.confirmedAt) || b.id - a.id) : out.sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? '') || b.id - a.id)
 }
@@ -626,7 +638,7 @@ export async function trackingDetail(id: number, u: AreaUser): Promise<ExportDet
   const v = data?.v ?? null
 
   const [users, units, companies, editors] = await Promise.all([userMap(), unitsOf([plan.shipmentId]), companyMap(plan.transportCompanyId != null ? [plan.transportCompanyId] : []), trackingEditors()])
-  const row = toRow(op, plan, shipment, customer?.name ?? '—', v?.document.space.code ?? null, { users, units, companies })
+  const row = toRow(op, plan, shipment, customer?.name ?? '—', v?.document.space.code ?? null, { users, units, companies, viewPrices: can.viewPrices(u.role) })
   const uname = (uid: number | null) => (uid != null ? users.get(uid)?.name ?? null : null)
 
   // outras unidades do pedido
@@ -736,7 +748,8 @@ function summaryVersion(doc: LoadDoc, rank: Map<string, number>): SummaryVersion
  * Dados do RESUMO PARA O CLIENTE de uma operação (e, com includeSiblings, das outras cargas do pedido que têm
  * seguimento). null = não existe ou o usuário não vê (canSeeExports + área do pedido). Produtos, totais e
  * equipamento da última versão APROVADA de cada carga. O DTO é montado pelo mapper puro trackingSummaryDto
- * (lista de permissões: nada interno — observações, incidência, responsável, pagamento, valores… — sai daqui).
+ * (lista de permissões: nada interno — observações, incidência, responsável, pagamento, condição de pagamento,
+ * CFOP, transportadora do ERP, valores… — sai daqui).
  */
 export async function trackingSummaryData(opId: number, u: AreaUser, o: { includeSiblings: boolean }): Promise<TrackingSummary | null> {
   if (!canSeeExports(u) || !Number.isInteger(opId) || opId <= 0) return null

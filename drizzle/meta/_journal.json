@@ -295,6 +295,13 @@
       "when": 1792179130980,
       "tag": "0041_customer_address_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793291522140,
+      "tag": "0042_cfop_customer_contact",
+      "breakpoints": true
     }
   ]
 }

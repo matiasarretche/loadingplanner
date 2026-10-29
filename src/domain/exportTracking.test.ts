@@ -283,6 +283,12 @@ describe('resumo para o cliente: DTO seguro (trackingSummaryDto)', () => {
     customerAddress: 'ENDERECO-INTERNO',
     area: 'EXPORT',
     notes: 'NOTA-INTERNA-PEDIDO',
+    // fiscais/comerciais internos (CFOP do pedido; condição de pagamento e transportadora do ERP vêm da carga):
+    // se alguém juntar a carga ao pedido por engano, nada disto pode sair no resumo
+    cfop: 'CFOP-INTERNO',
+    paymentTerms: { advancePct: 30, balanceWhen: 'AGAINST_DOCS', days: null, note: 'PAGAMENTO-INTERNO' },
+    transportCompanyId: 4242,
+    transportCompany: { id: 4242, code: 'COD-ERP-INTERNO', name: 'TRANSPORTADORA-INTERNA' },
   }
   const op = (id: number, loadPlanId: number, extra: Partial<SummaryOpRow> = {}): SummaryOpRow => ({
     id,
@@ -346,15 +352,25 @@ describe('resumo para o cliente: DTO seguro (trackingSummaryDto)', () => {
 
   /** todas as chaves do objeto, em qualquer profundidade */
   const keysOf = (v: unknown): string[] => (Array.isArray(v) ? v.flatMap(keysOf) : v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => [k, ...keysOf(x)]) : [])
-  const FORBIDDEN_KEYS = ['delayed', 'incident', 'notes', 'responsibleUserId', 'paymentReceivedAt', 'confirmedAt', 'confirmedBy', 'fieldSources', 'currentLocation', 'trackingStatus', 'trackingProvider', 'trackingRef', 'lastTrackingUpdate', 'unitPrice', 'amount', 'currency', 'valueUsd', 'tareKg', 'customerAddress', 'incoterm', 'plannedLoadingDate', 'actualLoadingDate', 'createdBy', 'updatedBy', 'closedAt', 'confirmedVersionId', 'provider', 'by']
-  const FORBIDDEN_VALUES = ['INTERN', '4242', '777.77', '20222', '2026-10-02', '2026-10-08', '2026-10-09', 'FOB']
+  const FORBIDDEN_KEYS = [
+    'delayed', 'incident', 'notes', 'responsibleUserId', 'paymentReceivedAt', 'confirmedAt', 'confirmedBy', 'fieldSources', 'currentLocation', 'trackingStatus', 'trackingProvider', 'trackingRef', 'lastTrackingUpdate',
+    'unitPrice', 'amount', 'currency', 'valueUsd', 'tareKg', 'customerAddress', 'incoterm', 'plannedLoadingDate', 'actualLoadingDate', 'createdBy', 'updatedBy', 'closedAt', 'confirmedVersionId', 'provider', 'by',
+    // condição de pagamento, CFOP e transportadora do ERP (uso interno)
+    'paymentTerms', 'cfop', 'transportCompanyId', 'transportCompany', 'transportCompanyCode', 'advancePct', 'balanceWhen',
+  ]
+  const FORBIDDEN_VALUES = ['INTERN', '4242', '777.77', '20222', '2026-10-02', '2026-10-08', '2026-10-09', 'FOB', 'COD-ERP', 'AGAINST_DOCS']
+  /** 'code' só existe no equipamento (40HC) e nas caixas de kit; em qualquer outro lugar seria código interno (ex.: do ERP) */
+  const CODE_ALLOWED_UNDER = new Set(['equipment', 'kitBoxes'])
+  const keysOutsideCodeOwners = (v: unknown): string[] =>
+    Array.isArray(v) ? v.flatMap(keysOutsideCodeOwners) : v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => [k, ...(CODE_ALLOWED_UNDER.has(k) ? [] : keysOutsideCodeOwners(x))]) : []
 
-  it('nunca contém campos internos (observações, incidência, atraso, responsável, pagamento, valores, origens…)', () => {
+  it('nunca contém campos internos (observações, incidência, atraso, responsável, pagamento, CFOP, transportadora do ERP, valores, origens…)', () => {
     for (const includeSiblings of [false, true]) {
       const dto = trackingSummaryDto(src({ includeSiblings }))
       expect(dto).not.toBeNull()
       const keys = keysOf(dto)
       for (const k of FORBIDDEN_KEYS) expect(keys).not.toContain(k)
+      expect(keysOutsideCodeOwners(dto)).not.toContain('code')
       const json = JSON.stringify(dto)
       for (const v of FORBIDDEN_VALUES) expect(json).not.toContain(v)
     }

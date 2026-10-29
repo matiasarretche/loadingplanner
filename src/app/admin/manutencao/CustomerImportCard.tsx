@@ -420,7 +420,7 @@ function Issues({ list, level }: { list: SheetIssue[]; level: 'BLOCKER' | 'WARN'
   return (
     <ul className={css.warnings}>
       {list.map((w, i) => (
-        <li key={i} className={level}>
+        <li key={i} className={css[level]}>
           {level === 'BLOCKER' ? 'Erro: ' : ''}
           {w.message}
           {w.rows.length > 0 && <small>{rowsLabel(w.rows)}</small>}

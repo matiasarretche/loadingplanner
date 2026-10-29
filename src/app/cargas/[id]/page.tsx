@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from 'drizzle-orm'
+import { asc, desc, eq, inArray, or } from 'drizzle-orm'
 import { SubmitButton } from '@/components/SubmitButton'
 import { isNoEquipment, serviceOf, TYPE_INFO } from '@/domain/shipmentType'
 import Link from 'next/link'
@@ -29,6 +29,10 @@ import { orderRefLabel } from '@/lib/orderRef'
 import { canAccessPlan } from '@/lib/access'
 import { AREA_LABEL } from '@/lib/areas'
 import { cargoVehicleWhere, roadOptions } from '@/lib/vehicles'
+import { paymentTermsText } from '@/domain/paymentTerms'
+import { sortTransportCompanies, transportCompanyLabel } from '@/domain/transportCompany'
+import { expeditionTransportLabel } from '@/components/editor/expeditionExport'
+import { carrierDiffers, commercialDiffers, termsDiffer } from './confirmCommercial'
 
 // as server actions desta página chamam a IA (Assistente, interpretar pedido): tempo máximo do plano Hobby da Vercel
 export const maxDuration = 300
@@ -93,6 +97,8 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
   if (!plan) notFound()
   const shipment = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, plan.shipmentId) })
   const customer = shipment && (await db.query.customers.findFirst({ where: eq(schema.customers.id, shipment.customerId) }))
+  // transportadora desta carga (vínculo pelo id; cabeçalho, painel, confirmação e expedição)
+  const company = plan.transportCompanyId != null ? (await db.query.transportCompanies.findFirst({ where: eq(schema.transportCompanies.id, plan.transportCompanyId) })) ?? null : null
   const versions = await db.select().from(schema.loadPlanVersions).where(eq(schema.loadPlanVersions.loadPlanId, planId)).orderBy(desc(schema.loadPlanVersions.version))
   const wanted = Number(sp.v)
   const v = versions.find((x) => x.version === wanted) ?? versions[0]
@@ -172,7 +178,11 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
           {shipment && <span className={`pill area-${shipment.area}`} style={{ marginRight: 6 }}>{AREA_LABEL[shipment.area]}</span>}
           {customer?.name} · {shipment?.destinationCountry} · {shipment?.incoterm} · {TYPE_INFO[service].label} ·{' '}
           {shipment && <OrderRefField planId={planId} area={shipment.area} value={shipment.orderRef} editable={can.editPlans(u.role)} />}{' '}
-          {(shipment?.originPlace || shipment?.destinationPlace) && `· ${shipment?.originPlace || '?'} → ${shipment?.destinationPlace || '?'} `}· criada por {uname(plan.createdBy)} em {dt(plan.createdAt)} · última alteração: {uname(v.updatedBy)}, {dt(v.updatedAt)}
+          {(shipment?.originPlace || shipment?.destinationPlace) && `· ${shipment?.originPlace || '?'} → ${shipment?.destinationPlace || '?'} `}
+          <span title="Transportadora desta carga (Proforma, transporte e fiscal)">· transportadora {company ? transportCompanyLabel(company) : '—'}</span>{' '}
+          <span title="CFOP do pedido (uso interno/fiscal)">· CFOP {shipment?.cfop ?? '—'}</span>{' '}
+          {shipment?.area === 'EXPORT' && can.viewPrices(u.role) && <span title="Condição de pagamento desta carga">· pagamento: {paymentTermsText(plan.paymentTerms, 'pt') ?? 'não definido'} </span>}
+          · criada por {uname(plan.createdBy)} em {dt(plan.createdAt)} · última alteração: {uname(v.updatedBy)}, {dt(v.updatedAt)}
         </span>
         <span className="spacer" />
         <Link className="btn small" href={`/cargas/${planId}/resumo?v=${v.version}`}>
@@ -214,7 +224,19 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
             </span>
           </>
         ) : (
-          canConfirm && <ConfirmOrderButton planId={planId} siblings={confirmSiblings} />
+          canConfirm && (
+            <ConfirmOrderButton
+              planId={planId}
+              siblings={confirmSiblings}
+              commercial={{
+                paymentTerms: paymentTermsText(plan.paymentTerms, 'pt'),
+                showPaymentTerms: can.viewPrices(u.role),
+                cfop: shipment?.cfop ?? null,
+                transportCompany: company ? { code: company.code, name: company.name } : null,
+                siblingsDiffer: commercialDiffers(plan, siblings.filter((s) => confirmSiblings.some((c) => c.loadPlanId === s.id))),
+              }}
+            />
+          )
         )}
       </div>
       {units.length > 1 && <UnitTabs units={units} current={planId} orderRef={shipment?.orderRef ?? null} area={shipment?.area ?? null} canDelete={can.editPlans(u.role)} />}
@@ -248,18 +270,36 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
       {await (async () => {
         const seePrices = can.viewPrices(u.role)
         const pv = shipment?.area === 'EXPORT' && seePrices ? await planValue({ v, shipment, plan }) : null
-        const companies = await db.select({ id: schema.transportCompanies.id, code: schema.transportCompanies.code, name: schema.transportCompanies.name, active: schema.transportCompanies.active }).from(schema.transportCompanies).orderBy(asc(schema.transportCompanies.code))
+        // transportadoras do seletor: as ativas + a vinculada a esta carga (mesmo inativa)
+        const tc = schema.transportCompanies
+        const companies = seePrices
+          ? sortTransportCompanies(
+              await db
+                .select({ id: tc.id, code: tc.code, name: tc.name, active: tc.active })
+                .from(tc)
+                .where(plan.transportCompanyId != null ? or(eq(tc.active, true), eq(tc.id, plan.transportCompanyId)) : eq(tc.active, true)),
+            )
+          : []
+        // pedido já confirmado (alguma unidade em Exportações em curso): aviso no painel
+        const orderOps = exportOps ?? (seePrices && shipment?.area === 'EXPORT' ? await operationIdsByPlan(units.map((x) => x.id)) : null)
+        const orderConfirmed = Boolean(orderOps && units.some((x) => orderOps.has(x.id)))
+        // as outras unidades do pedido diferem desta? (a caixa da transportadora vem desmarcada e avisa)
+        const others = siblings.filter((s) => s.id !== planId)
         return (
           <>
             {seePrices && <ProformaPanel
               planId={planId}
-              exportArea={shipment?.area === 'EXPORT'}
+              area={shipment?.area === 'EXPORT' ? 'EXPORT' : 'DOMESTIC'}
               editable={can.editPlans(u.role)}
               goodsUsd={pv?.value.totals.USD ?? null}
               incoterm={shipment?.incoterm ?? null}
               companies={companies}
+              orderUnits={units.length}
+              orderConfirmed={orderConfirmed}
+              carrierDiffers={carrierDiffers(plan, others)}
+              termsDiffer={termsDiffer(plan, others)}
               agents={await db.select({ id: schema.agents.id, name: schema.agents.name, active: schema.agents.active }).from(schema.agents).orderBy(asc(schema.agents.name))}
-              value={{ agentId: plan.agentId, transportCompanyId: plan.transportCompanyId, freightUsd: plan.freightUsd, insuranceUsd: plan.insuranceUsd, paymentTerms: plan.paymentTerms }}
+              value={{ agentId: plan.agentId, transportCompanyId: plan.transportCompanyId, freightUsd: plan.freightUsd, insuranceUsd: plan.insuranceUsd, paymentTerms: plan.paymentTerms, cfop: shipment?.cfop ?? null }}
             />}
             {pv && <ValuePanel pv={pv} />}
           </>
@@ -310,7 +350,7 @@ export default async function CargaPage({ params, searchParams }: PageProps<'/ca
           ) : undefined
         }
         photoCount={(await db.select({ id: schema.loadPhotos.id }).from(schema.loadPhotos).where(eq(schema.loadPhotos.loadPlanId, planId))).length}
-        expedition={{ version: v.version, status: v.status, mode: TYPE_INFO[service].label, transportCompany: plan.transportCompanyId ? await db.query.transportCompanies.findFirst({ where: eq(schema.transportCompanies.id, plan.transportCompanyId) }).then((c) => (c ? `${c.code} — ${c.name}` : null)) : null }}
+        expedition={{ version: v.version, status: v.status, mode: TYPE_INFO[service].label, transportCompany: expeditionTransportLabel(company) }}
         videoInfo={{ name: plan.name, customer: customer?.name ?? null, orderRef: shipment?.orderRef ? orderRefLabel(shipment.orderRef, shipment.area) : null, destination: shipment?.destinationCountry ?? null }}
       />
 

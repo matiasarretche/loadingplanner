@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { db, schema } from '@/db'
 import { dt } from '@/components/format'
+import { expeditionTransportLabel } from '@/components/editor/expeditionExport'
 import { serviceOf, TYPE_INFO } from '@/domain/shipmentType'
 import { canAccessPlan } from '@/lib/access'
 import { requireUser } from '@/lib/auth'
@@ -30,7 +31,9 @@ export default async function ExpedicaoPage({ params }: PageProps<'/cargas/[id]/
   const v = await db.query.loadPlanVersions.findFirst({ where: and(eq(schema.loadPlanVersions.loadPlanId, planId), eq(schema.loadPlanVersions.status, 'APPROVED')), orderBy: desc(schema.loadPlanVersions.version) })
   const shipment = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, plan.shipmentId) })
   const customer = shipment ? await db.query.customers.findFirst({ where: eq(schema.customers.id, shipment.customerId) }) : undefined
-  const company = plan.transportCompanyId ? await db.query.transportCompanies.findFirst({ where: eq(schema.transportCompanies.id, plan.transportCompanyId) }) : undefined
+  // transportadora (sem condição de pagamento nem CFOP: a Expedição não vê dados comerciais/fiscais)
+  const company = plan.transportCompanyId ? await db.query.transportCompanies.findFirst({ where: eq(schema.transportCompanies.id, plan.transportCompanyId), columns: { code: true, name: true } }) : undefined
+  const transportCompany = expeditionTransportLabel(company)
   const orderRef = shipment?.orderRef ? orderRefLabel(shipment.orderRef, shipment.area) : null
   const service = serviceOf(shipment)
   const approver = v?.approvedBy ? await db.query.users.findFirst({ where: eq(schema.users.id, v.approvedBy), columns: { name: true } }) : undefined
@@ -73,7 +76,7 @@ export default async function ExpedicaoPage({ params }: PageProps<'/cargas/[id]/
           {v && v.document.space.kind !== 'NONE' && <> · {v.document.space.code}</>}
         </div>
         <div>
-          <span className="muted">Transportadora</span> <strong>{company ? `${company.code} — ${company.name}` : '—'}</strong>
+          <span className="muted">Transportadora</span> <strong>{transportCompany ?? 'A definir'}</strong>
         </div>
         {v?.approvedAt && (
           <div className="muted">
@@ -104,7 +107,7 @@ export default async function ExpedicaoPage({ params }: PageProps<'/cargas/[id]/
       {v ? (
         <ExpeditionView
           doc={v.document}
-          info={{ planName: plan.name, version: v.version, status: v.status, customer: customer?.name ?? null, orderRef, destination: shipment?.destinationCountry ?? null, mode: TYPE_INFO[service].label, transportCompany: company ? `${company.code} — ${company.name}` : null, generatedBy: u.name }}
+          info={{ planName: plan.name, version: v.version, status: v.status, customer: customer?.name ?? null, orderRef, destination: shipment?.destinationCountry ?? null, mode: TYPE_INFO[service].label, transportCompany, generatedBy: u.name }}
         />
       ) : (
         <div className="alert warn">Esta carga ainda não tem versão aprovada: a expedição só vê cargas aprovadas.</div>
