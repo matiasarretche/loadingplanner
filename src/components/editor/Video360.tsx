@@ -5,6 +5,7 @@ import type { PdfLang } from '@/lib/pdf/i18n'
 import { PDF_LOGO_PATH, pdfText } from '@/lib/pdf/i18n'
 import type { UnitGeometry } from '@/domain/load'
 import { kitBoxLines, kitFamilyOf } from '@/domain/kitBoxes'
+import { productNameIn } from '@/domain/productNameI18n'
 import type { PackSnapshot } from '@/domain/types'
 import { IntroStep, loadLogo, recordOrbitMp4, VideoUnsupportedError } from '@/lib/video/orbitVideo'
 import type { OrbitRecorder } from '../three/Scene3D'
@@ -128,7 +129,7 @@ export function Video360({ recorder, info, equipment, totals, lang, onClose, geo
       const intro: IntroStep[] = introSteps(geoms, labelOf, t.loose, packsOf).map((s) => ({
         ids: s.ids,
         title: s.title,
-        lines: [...s.counts.entries()].map(([sku, c]) => `${nf.format(c.n)} × ${c.name}${c.name.includes(sku) ? '' : ` (${sku})`}${boxesOf(c)}`),
+        lines: [...s.counts.entries()].map(([sku, c]) => `${nf.format(c.n)} × ${productNameIn(c.name, lang)}${c.name.includes(sku) ? '' : ` (${sku})`}${boxesOf(c)}`),
       }))
       const blob = await recordOrbitMp4(rec, { overlay: { title: info.customer || info.name, lines: [line1, units], logo }, intro, introLabel: t.loading, onProgress: setProgress })
       setVideo({ url: URL.createObjectURL(blob), file: new File([blob], fileName, { type: 'video/mp4' }) })

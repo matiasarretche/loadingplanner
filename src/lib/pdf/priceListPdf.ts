@@ -8,6 +8,7 @@
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import type { TechDisplay } from '@/domain/technology'
 import type { PaymentTerms } from '@/domain/paymentTerms'
+import { productNameIn } from '@/domain/productNameI18n'
 import { paymentTermsText } from '@/domain/paymentTerms'
 import type { PriceListData, PriceListRow } from '@/lib/priceList'
 import { COMPANY, PdfLang, PDF_TZ } from './i18n'
@@ -121,11 +122,12 @@ const numFmt = (locale: string) => {
  * se `withThickness`, a espessura. Demais famílias: o nome do catálogo (distingue BPF, padrão, LP…).
  */
 export function priceListProductText(family: string, r: PriceListRow, lang: PdfLang, withThickness = false): string {
-  if (!hideThickness(family) || !r.widthM || !r.lengthM) return r.name
+  // nome do catálogo (em português) no idioma da lista: "Silo bag 9 ft × 60 m", "Silobolsa 9 pies × 60 m"
+  if (!hideThickness(family) || !r.widthM || !r.lengthM) return productNameIn(r.name, lang)
   const locale = T[lang].locale
   const nd = numFmt(locale)
   const tt = TANK[lang]
-  const head = `${family}${r.plusX3 ? ' Plus X3' : ''} ${nd(r.widthM)} m × ${nd(r.lengthM)} m${withThickness && r.thicknessUm ? ` × ${nd(r.thicknessUm)} µm` : ''}`
+  const head = `${productNameIn(family, lang)}${r.plusX3 ? ' Plus X3' : ''} ${nd(r.widthM)} m × ${nd(r.lengthM)} m${withThickness && r.thicknessUm ? ` × ${nd(r.thicknessUm)} µm` : ''}`
   const extras = [r.valves ? `${nd(r.valves)}V` : null, r.unitsPerPack ? tt.pack(nd(r.unitsPerPack)) : null, r.filmWidthM ? tt.film(nd(r.filmWidthM)) : null, r.brand !== 'Pacifil' ? r.brand : null].filter(Boolean)
   return `${head}${r.capacityL ? ` — ${nd(r.capacityL)} ${T[lang].liters}` : ''}${extras.length ? ` (${extras.join(', ')})` : ''}`
 }
@@ -137,7 +139,9 @@ export async function buildPriceListPdf(data: PriceListData, o: PriceListOptions
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
   const families = [...new Set(data.groups.map((g) => g.family))]
-  const famTxt = families.length > 3 ? '' : families.join(' · ')
+  // famílias no idioma da lista (título, cabeçalho, rodapé e referência do WhatsApp/e-mail); `families` e
+  // g.family continuam em português: são as chaves do NXT e das regras dos reservatórios
+  const famTxt = families.length > 3 ? '' : [...new Set(families.map((f) => productNameIn(f, o.lang)))].join(' · ')
   pdf.setTitle(clean(`${t.title}${famTxt ? ` — ${famTxt}` : ''}`))
   pdf.setAuthor(COMPANY.legalName)
   pdf.setCreator('Pacifil Export Load Planner')
@@ -200,7 +204,7 @@ export async function buildPriceListPdf(data: PriceListData, o: PriceListOptions
     const descH = descLines.length ? Math.min(descLines.length * 9.5 + 3, A4.h / 2) : 0
     w.ensure(31 + descH + tagH(mode) + 1 + 30 + 2 * 22)
     // largura do grupo no idioma da lista ("2,15 m" / "2.15 m"), igual às linhas
-    w.section(t.group(g.family, g.widthM ? `${nd(g.widthM)} m` : g.label))
+    w.section(t.group(productNameIn(g.family, o.lang), g.widthM ? `${nd(g.widthM)} m` : productNameIn(g.label, o.lang)))
     if (mode === 'SEAL' && seal) {
       // selo à esquerda (topo logo abaixo do traço da seção) e a menção centralizada ao lado
       const sw = (seal.width / seal.height) * SEAL_TAG

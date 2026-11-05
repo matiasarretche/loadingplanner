@@ -11,6 +11,7 @@ import { PaymentTerms, paymentTermsText, TermsLang } from '@/domain/paymentTerms
 import type { KitBoxLine } from '@/domain/kitBoxes'
 import { FamilyTech, TECHNOLOGIES, TechKey } from '@/domain/technology'
 import { clean } from './winAnsi'
+import { productNameIn } from '@/domain/productNameI18n'
 import { buyerPlace } from './orderData'
 
 export interface OrderPdfData {
@@ -125,7 +126,8 @@ export class Writer {
     private font: PDFFont,
     private bold: PDFFont,
     private footer: string,
-    lang: PdfLang = 'pt',
+    /** idioma do documento: também traduz os nomes do catálogo (productNameIn) */
+    readonly lang: PdfLang = 'pt',
   ) {
     this.t = pdfText(lang)
     this.nf = numFmt(lang)
@@ -321,10 +323,17 @@ export class Writer {
    * icons: imagem (ex.: selo PACIFIL NXT) por linha de dados, desenhada logo depois do texto da coluna
    * `iconCol` (que reserva o espaço dela); a linha cresce o necessário para o ícone caber.
    */
-  table(cols: { title: string; w: number; align?: 'right'; strong?: boolean }[], rows: string[][], boldLast = false, opts: { icons?: (PDFImage | null | undefined)[]; iconCol?: number; iconSize?: number } = {}) {
+  table(
+    cols: { title: string; w: number; align?: 'right'; strong?: boolean }[],
+    rows: string[][],
+    boldLast = false,
+    // onRow: topo (y da 1ª linha de texto) e página de cada linha de dados já desenhada — para desenhar junto
+    // (ex.: amostras de cor) mesmo quando o texto quebra em várias linhas ou a tabela continua na página seguinte
+    opts: { icons?: (PDFImage | null | undefined)[]; iconCol?: number; iconSize?: number; onRow?: (i: number, y0: number, page: PDFPage) => void } = {},
+  ) {
     const iconCol = opts.iconCol ?? 0
     const isz = opts.iconSize ?? 14
-    const draw = (cells: string[], bold: boolean, head = false, icon: PDFImage | null = null) => {
+    const draw = (cells: string[], bold: boolean, head = false, icon: PDFImage | null = null, row = -1) => {
       const size = head ? 7.5 : 8.5
       const lead = size + 2
       const wrapped = cells.map((c, k) => this.wrap(c ?? '', cols[k].w - 6 - (icon && k === iconCol ? isz + 3 : 0), size, bold || head || (!head && cols[k].strong)))
@@ -347,12 +356,13 @@ export class Writer {
         }
         x += col.w
       })
+      if (row >= 0) opts.onRow?.(row, y0, this.page)
       this.y = y0 - (n - 1) * lead - 4 - extra
       this.line()
       this.y -= 10
     }
     draw(cols.map((c) => c.title), false, true)
-    rows.forEach((r, i) => draw(r, boldLast && i === rows.length - 1, false, opts.icons?.[i] ?? null))
+    rows.forEach((r, i) => draw(r, boldLast && i === rows.length - 1, false, opts.icons?.[i] ?? null, i))
   }
   /**
    * Quadro destacado (fundo verde-claro, borda e barra verdes à esquerda): imagem opcional à esquerda (ex.:
@@ -412,7 +422,7 @@ export class Writer {
           { title: `${t.price} USD`, w: 70, align: 'right' },
           { title: `${t.total} USD`, w: 75, align: 'right' },
         ],
-        [...priced.map((l) => [l.sku, l.name, nf(l.units), nf(l.unitUsd!, 2), nf(l.amount ?? 0, 2)]), [t.totalRow, '', '', '', v.totalUsd != null ? nf(v.totalUsd, 2) : '—']],
+        [...priced.map((l) => [l.sku, productNameIn(l.name, this.lang), nf(l.units), nf(l.unitUsd!, 2), nf(l.amount ?? 0, 2)]), [t.totalRow, '', '', '', v.totalUsd != null ? nf(v.totalUsd, 2) : '—']],
         true,
       )
     else this.pairs([[t.valueTotal('—').replace(' (—)', ''), t.noPrices]])
@@ -682,7 +692,8 @@ export async function buildOrderPdf(d: OrderPdfData, images: Uint8Array[], brand
   const cols = [{ title: t.code, w: codeW }, { title: t.description, w: A4.w - 2 * M - codeW - nums.reduce((a, c) => a + c.w, 0) }, ...nums]
   const rows = d.products.map((p) => [
     p.sku,
-    p.kitBoxes?.length ? `${p.name} — ${t.kitBoxes(p.kitBoxes)}` : p.name,
+    // nome do catálogo no idioma do PDF (o snapshot guarda em português)
+    p.kitBoxes?.length ? `${productNameIn(p.name, brand.lang)} — ${t.kitBoxes(p.kitBoxes)}` : productNameIn(p.name, brand.lang),
     nf(p.boxes),
     nf(p.units),
     // peso líquido (só produto) por unidade de venda

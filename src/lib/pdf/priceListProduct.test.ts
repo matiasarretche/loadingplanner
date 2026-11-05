@@ -47,7 +47,16 @@ describe('descrição dos reservatórios na lista de preços', () => {
     expect(t500).toBe('Hidrosilo 2 m × 5,5 m × 500 µm — 5.000 litros')
     expect(t500).not.toBe(t600)
   })
-  it('as outras famílias usam o nome do catálogo', () => {
-    expect(priceListProductText('Lona de silagem', row({ name: 'Lona padrão 8 × 50 m × 125 µm', widthM: 8, lengthM: 50 }), 'en')).toBe('Lona padrão 8 × 50 m × 125 µm')
+  it('as outras famílias usam o nome do catálogo, no idioma da lista', () => {
+    const lona = row({ name: 'Lona padrão 8 × 50 m × 125 µm', widthM: 8, lengthM: 50 })
+    expect(priceListProductText('Lona de silagem', lona, 'pt')).toBe('Lona padrão 8 × 50 m × 125 µm')
+    expect(priceListProductText('Lona de silagem', lona, 'en')).toBe('Standard silage cover 8 × 50 m × 125 µm')
+    expect(priceListProductText('Lona de silagem', lona, 'es')).toBe('Lona estándar 8 × 50 m × 125 µm')
+  })
+  it('silo-bolsa: "pés" em inglês e espanhol (lista em inglês mostrava "Silo-bolsa 9 pés")', () => {
+    const sb = row({ name: 'Silo-bolsa 9 pés × 60 m × 210 µm', widthM: null, lengthM: 60, thicknessUm: 210, capacityL: null })
+    expect(priceListProductText('Silo-bolsa', sb, 'en')).toBe('Silo bag 9 ft × 60 m × 210 µm')
+    expect(priceListProductText('Silo-bolsa', sb, 'es')).toBe('Silobolsa 9 pies × 60 m × 210 µm')
+    expect(priceListProductText('Silo-bolsa', sb, 'pt')).toBe('Silo-bolsa 9 pés × 60 m × 210 µm')
   })
 })

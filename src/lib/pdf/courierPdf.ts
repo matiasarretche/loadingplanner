@@ -5,6 +5,7 @@
  */
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import type { CourierPlan } from '@/domain/courier'
+import { productNameIn } from '@/domain/productNameI18n'
 import { COMPANY, PdfLang, pdfText, PDF_TZ } from './i18n'
 import { A4, clean, GREY, LINE, M, Writer, type PdfValue } from './orderPdf'
 
@@ -88,7 +89,7 @@ export async function buildCourierPdf(plan: CourierPlan, meta: CourierPdfMeta): 
       { title: t.courierKgShort, w: 60, align: 'right' },
       { title: t.courierVolShort, w: 61, align: 'right' },
     ],
-    plan.rows.map((r) => [r.sku, r.kitBox ? `${r.name} — ${t.kitBox(r.kitBox)}` : r.name, nf(r.boxes), nf(r.units), `${cm(r.dimsMm.l)} × ${cm(r.dimsMm.w)} × ${cm(r.dimsMm.h)}`, nf(r.grossKgEach, 1), nf(r.volKgEach, 1)]),
+    plan.rows.map((r) => [r.sku, r.kitBox ? `${productNameIn(r.name, meta.lang)} — ${t.kitBox(r.kitBox)}` : productNameIn(r.name, meta.lang), nf(r.boxes), nf(r.units), `${cm(r.dimsMm.l)} × ${cm(r.dimsMm.w)} × ${cm(r.dimsMm.h)}`, nf(r.grossKgEach, 1), nf(r.volKgEach, 1)]),
   )
   w.ensure(14)
   w.text(`${t.totalRow}: ${nf(T.pieces)} · ${nf(T.grossKg, 1)} kg · ${nf(T.volKg, 1)} kg vol. · ${nf(T.cbm, 3)} m³`, M, 8.5, { bold: true })

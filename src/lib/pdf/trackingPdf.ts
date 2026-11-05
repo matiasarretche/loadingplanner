@@ -9,6 +9,7 @@ import { PDFDocument, PDFFont, rgb, StandardFonts } from 'pdf-lib'
 import { EXPORT_PIPELINE, EXPORT_STATUS_LABEL, ExportStatus, sameForAllUnits, SUMMARY_SECTIONS, SummaryEquipment, SummarySection, SummaryUnit, todayBR, TrackingSummary } from '@/domain/exportTracking'
 import type { ShipmentService } from '@/domain/shipmentType'
 import { countryNameIn } from '@/lib/countries'
+import { productNameIn } from '@/domain/productNameI18n'
 import { COMPANY, PdfLang, pdfText, PdfText, PDF_TZ } from './i18n'
 import { A4, clean, GREEN, GREEN_DARK, GREY, LINE, M, Writer } from './orderPdf'
 
@@ -523,7 +524,7 @@ export async function buildTrackingSummaryPdf(d: TrackingSummary, o: TrackingPdf
       ]
       const cols = [{ title: x.code, w: codeW }, { title: x.description, w: A4.w - 2 * M - codeW - nums.reduce((a, c) => a + c.w, 0) }, ...nums]
       const rowsOf = (u: SummaryUnit) => {
-        const rows = u.products.map((p) => [p.sku, p.kitBoxes?.length ? `${p.name} — ${t.kitBoxes(p.kitBoxes)}` : p.name, nf(p.boxes), nf(p.units), nf(p.netKg, 1), nf(p.grossKg, 1)])
+        const rows = u.products.map((p) => [p.sku, p.kitBoxes?.length ? `${productNameIn(p.name, lang)} — ${t.kitBoxes(p.kitBoxes)}` : productNameIn(p.name, lang), nf(p.boxes), nf(p.units), nf(p.netKg, 1), nf(p.grossKg, 1)])
         if (u.totals) rows.push([x.total, '', nf(u.totals.packages), nf(u.totals.units), nf(u.totals.netKg, 1), nf(u.totals.grossKg, 1)])
         return rows
       }

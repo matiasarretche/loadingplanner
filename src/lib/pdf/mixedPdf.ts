@@ -9,6 +9,7 @@ import { orientDims } from '@/domain/geometry'
 import type { MixedResult } from '@/domain/mixedPallets'
 import type { PalletDoc } from '@/domain/types'
 import { kitBoxLines, kitFamilyOf } from '@/domain/kitBoxes'
+import { productNameIn } from '@/domain/productNameI18n'
 import { COMPANY, PdfLang, pdfText, PdfText, PDF_TZ } from './i18n'
 import { A4, clean, GREY, LINE, M, Writer, type PdfValue } from './orderPdf'
 
@@ -118,7 +119,7 @@ export async function buildMixedPdf(plan: MixedResult, meta: MixedPdfMeta): Prom
       { title: t.onPallets, w: 70, align: 'right' },
       { title: t.situation, w: 80, align: 'right' },
     ],
-    plan.check.map((c) => [c.sku, c.name, nf(c.requested), nf(c.placed), c.ok ? 'OK' : c.placed < c.requested ? t.missingN(nf(c.requested - c.placed)) : t.exceedsN(nf(c.placed - c.requested))]),
+    plan.check.map((c) => [c.sku, productNameIn(c.name, meta.lang), nf(c.requested), nf(c.placed), c.ok ? 'OK' : c.placed < c.requested ? t.missingN(nf(c.requested - c.placed)) : t.exceedsN(nf(c.placed - c.requested))]),
   )
   if (plan.unplaced.length) {
     w.ensure(14)
@@ -170,17 +171,19 @@ export async function buildMixedPdf(plan: MixedResult, meta: MixedPdfMeta): Prom
         { title: t.units, w: 55, align: 'right' },
         { title: t.grossKg, w: 86, align: 'right' },
       ],
-      p.lines.map((l) => ['', l.sku, l.name, nf(l.boxes), nf(l.units), nf(l.grossKg, 1)]),
+      p.lines.map((l) => ['', l.sku, productNameIn(l.name, meta.lang), nf(l.boxes), nf(l.units), nf(l.grossKg, 1)]),
+      false,
+      {
+        // amostra de cor na 1ª coluna, na altura real da linha (o nome pode quebrar; a tabela pode mudar de página)
+        onRow: (k, y0, page) => {
+          const l = p.lines[k]
+          const pack = Object.values(p.doc.packs).find((x) => x.sku === l.sku)
+          if (!pack) return
+          const c = hex(colorOf.get(pack.sku) ?? pack.color)
+          page.drawRectangle({ x: M + 3, y: y0 - 2, width: 7, height: 7, color: rgb(c.r, c.g, c.b) })
+        },
+      },
     )
-    // amostras de cor na 1ª coluna da tabela recém-desenhada
-    const rowH = 14
-    p.lines.forEach((l, k) => {
-      const pack = Object.values(p.doc.packs).find((x) => x.sku === l.sku)
-      if (!pack) return
-      const c = hex(colorOf.get(pack.sku) ?? pack.color)
-      const y = w.y + rowH * (p.lines.length - k) - 2
-      w.page.drawRectangle({ x: M + 3, y, width: 7, height: 7, color: rgb(c.r, c.g, c.b) })
-    })
     w.ensure(14)
     const crit = p.issues.filter((x) => x.severity === 'CRITICAL')
     w.text(t.palletLine(nf(p.grossKg, 1), nf(p.netKg, 1), nf(p.heightMm), nf(p.volumeUtilPct), crit.length), M, 8, { color: crit.length ? rgb(0.84, 0.15, 0.16) : GREY })
