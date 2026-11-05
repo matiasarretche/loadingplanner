@@ -6,7 +6,7 @@ const VARIANTS: [string, string, string][] = [
     ['Fita de butil 20 × 15 cm', 'Butyl tape 20 × 15 cm', 'Cinta de butilo 20 × 15 cm'],
     ['Fita PE silo-bolsa 41 cm × 5 m transparente', 'PE silo bag tape 41 cm × 5 m clear', 'Cinta PE para silobolsa 41 cm × 5 m transparente'],
     ['Fita PE silo-bolsa 41 cm × 5 m branca', 'PE silo bag tape 41 cm × 5 m white', 'Cinta PE para silobolsa 41 cm × 5 m blanca'],
-    ['Kit Hydroforce (mangueira + camlock + torneira)', 'Hydroforce kit (hose + camlock + tap)', 'Kit Hydroforce (manguera + camlock + grifo)'],
+    ['Kit Hydroforce (mangueira + camlock + torneira)', 'Hydroforce kit (hose + camlock + tap)', 'Kit Hydroforce (manguera + camlock + canilla)'],
     ['Lona padrão 6,5 × 20 m × 500 µm', 'Standard silage cover 6.5 × 20 m × 500 µm', 'Lona estándar 6,5 × 20 m × 500 µm'],
     ['Silo-bolsa 9 pés × 250 pés (76,2 m) × 225 µm', 'Silo bag 9 ft × 250 ft (76.2 m) × 225 µm', 'Silobolsa 9 pies × 250 pies (76,2 m) × 225 µm'],
     ['Silo-bolsa 6,5 pés × 60 m × 160 µm', 'Silo bag 6.5 ft × 60 m × 160 µm', 'Silobolsa 6,5 pies × 60 m × 160 µm'],

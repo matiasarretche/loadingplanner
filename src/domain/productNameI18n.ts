@@ -93,7 +93,7 @@ const PHRASES: Record<'es' | 'en', [string, string][]> = {
     ['filme', 'film'],
     ['Acessórios', 'Accesorios'],
     ['mangueira', 'manguera'],
-    ['torneira', 'grifo'],
+    ['torneira', 'canilla'],
     ['sem impressão', 'sin impresión'],
     ['exportação', 'exportación'],
     ['linha', 'línea'],
